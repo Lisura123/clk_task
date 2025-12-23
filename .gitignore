@@ -1,0 +1,38 @@
+# Node / Backend
+node_modules/
+project/backend/node_modules/
+project/frontend/node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+project/backend/.env
+project/frontend/.env
+.env.*
+
+# Build output
+project/frontend/dist/
+project/backend/uploads/
+
+# Coverage / reports
+coverage/
+*.lcov
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Cache
+*.cache
+.cache/
+project/frontend/.vite/
+
+# Misc
+*.bak
+*.tmp
