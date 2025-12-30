@@ -14,6 +14,7 @@ import Users from './pages/Users';
 import CreateEmployee from './pages/CreateEmployee';
 import PendingRegistrations from './pages/PendingRegistrations';
 import Departments from './pages/Departments';
+import Groups from './pages/Groups';
 import Settings from './pages/Settings';
 import Search from './pages/Search';
 import Notifications from './pages/Notifications';
@@ -98,7 +99,7 @@ function App() {
           <Route
             path="dashboard/create-employee"
             element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
                 <CreateEmployee />
               </ProtectedRoute>
             }
@@ -118,6 +119,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['super_admin']}>
                 <Departments />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Dashboard Group Management */}
+          <Route
+            path="dashboard/groups"
+            element={
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+                <Groups />
               </ProtectedRoute>
             }
           />

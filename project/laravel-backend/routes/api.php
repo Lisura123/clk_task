@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\TimeEntryController;
 use App\Http\Controllers\Api\TaskLinkController;
+use App\Http\Controllers\Api\GroupController;
 
 /*
 |--------------------------------------------------------------------------
@@ -93,6 +94,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/timer/start', [TimeEntryController::class, 'startTimer']);
     Route::post('/timer/{id}/stop', [TimeEntryController::class, 'stopTimer']);
     Route::get('/timer/running', [TimeEntryController::class, 'getRunningTimer']);
+
+    // Group routes
+    Route::get('/groups', [GroupController::class, 'index']);
+    Route::post('/groups', [GroupController::class, 'store']); // Admin and dept admin
+    Route::get('/groups/{id}', [GroupController::class, 'show']);
+    Route::put('/groups/{id}', [GroupController::class, 'update']); // Admin and dept admin
+    Route::delete('/groups/{id}', [GroupController::class, 'destroy']); // Admin and dept admin
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);

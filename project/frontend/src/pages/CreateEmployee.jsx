@@ -39,8 +39,8 @@ export default function CreateEmployee() {
           managedDeptIds.includes(dept.id)
         );
         
-        // Auto-select department if only one is managed
-        if (availableDepartments.length === 1) {
+        // Auto-select the first department for dept admins (they can't change it)
+        if (availableDepartments.length > 0) {
           setFormData(prev => ({ ...prev, department: availableDepartments[0].name }));
         }
       }
@@ -373,10 +373,10 @@ export default function CreateEmployee() {
                   name="department"
                   value={formData.department}
                   onChange={handleChange}
-                  disabled={user?.role === 'dept_admin' && departments.length === 1}
+                  disabled={user?.role === 'dept_admin'}
                   className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
                     errors.department ? 'border-red-500' : 'border-gray-300'
-                  } ${user?.role === 'dept_admin' && departments.length === 1 ? 'bg-gray-100' : ''}`}
+                  } ${user?.role === 'dept_admin' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                 >
                   <option value="">Select Department</option>
                   {departments.map((dept) => (
@@ -389,8 +389,8 @@ export default function CreateEmployee() {
                   <p className="text-red-600 text-sm mt-1">{errors.department}</p>
                 )}
                 {user?.role === 'dept_admin' && (
-                  <p className="text-gray-600 text-xs mt-1">
-                    You can only create employees in your managed departments
+                  <p className="text-blue-600 text-xs mt-1">
+                    This is your managed department and cannot be changed
                   </p>
                 )}
               </div>

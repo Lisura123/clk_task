@@ -276,13 +276,6 @@ export default function Users() {
         <div className="text-sm text-gray-600">
           Showing {filteredUsers.length} of {users.length} employees
         </div>
-        <button
-          onClick={handleOpenCreateModal}
-          className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          Add Employee
-        </button>
       </div>
 
       {/* Filters */}
