@@ -97,9 +97,12 @@ class UserController extends Controller
 
         // Send email notification to the approved user
         try {
+            \Log::info('Sending registration approval email to: ' . $targetUser->email);
             $targetUser->notify(new RegistrationApprovedNotification($user->name));
+            \Log::info('Registration approval email sent successfully');
         } catch (\Exception $e) {
             \Log::error('Failed to send approval email: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
         }
 
         // Notify the user that their registration was approved (in-app notification)
@@ -212,9 +215,13 @@ class UserController extends Controller
                 'department' => $request->department,
                 'role' => $request->role,
             ];
+            
+            \Log::info('Sending employee account creation email to: ' . $newUser->email);
             $newUser->notify(new EmployeeAccountCreatedNotification($credentials, $user->name));
+            \Log::info('Employee account creation email sent successfully');
         } catch (\Exception $e) {
             \Log::error('Failed to send employee account creation email: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
         }
 
         return response()->json([
