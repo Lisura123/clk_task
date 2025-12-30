@@ -44,8 +44,12 @@ class UserController extends Controller
                 $query->whereIn('department_id', $managedDeptIds);
                 
                 // Log the SQL query
-                \Log::info('SQL Query: ' . $query->toSql());
-                \Log::info('Query Bindings: ', $query->getBindings());
+                $sql = $query->toSql();
+                $bindings = $query->getBindings();
+                \Log::info('SQL Query', [
+                    'sql' => $sql,
+                    'bindings' => json_encode($bindings)
+                ]);
             } else {
                 // If no managed departments, return empty result
                 \Log::warning('Dept admin has no managed departments');
