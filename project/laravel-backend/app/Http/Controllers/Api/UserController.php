@@ -25,6 +25,12 @@ class UserController extends Controller
         // Filter by managed departments for dept admin
         if ($user->isDeptAdmin()) {
             $managedDeptIds = $user->managed_department_ids ?? [];
+            \Log::info('Dept Admin filtering users', [
+                'user_id' => $user->id,
+                'user_role' => $user->role,
+                'managed_department_ids' => $managedDeptIds
+            ]);
+            
             if (!empty($managedDeptIds)) {
                 $query->whereIn('department_id', $managedDeptIds);
             } else {
@@ -46,6 +52,8 @@ class UserController extends Controller
         }
 
         $users = $query->latest()->paginate($request->get('per_page', 15));
+        
+        \Log::info('Users fetched', ['count' => $users->count()]);
         
         // Add department_name to each user for easier frontend access
         $users->getCollection()->transform(function ($user) {
