@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Department;
 use App\Models\Notification;
 use App\Notifications\RegistrationApprovedNotification;
+use App\Notifications\EmployeeAccountCreatedNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -202,9 +203,23 @@ class UserController extends Controller
             'status' => 'active',
         ]);
 
+        // Send email notification with login credentials
+        try {
+            $credentials = [
+                'username' => $request->username,
+                'email' => $request->email,
+                'password' => $request->password, // Plain text password for email
+                'department' => $request->department,
+                'role' => $request->role,
+            ];
+            $newUser->notify(new EmployeeAccountCreatedNotification($credentials, $user->name));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send employee account creation email: ' . $e->getMessage());
+        }
+
         return response()->json([
             'message' => 'User created successfully',
-            'user' => $newUser,
+            'data' => $newUser,
         ], 201);
     }
 
