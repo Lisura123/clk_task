@@ -27,6 +27,22 @@ export default function Groups() {
     fetchData();
   }, []);
 
+  // Auto-set department for dept admin when departments are loaded
+  useEffect(() => {
+    if (showCreateModal && user?.role === 'dept_admin' && departments.length > 0 && !formData.department_id) {
+      const managedDeptIds = user.managed_department_ids || [];
+      if (managedDeptIds.length > 0) {
+        const matchingDept = departments.find(d => d.id === managedDeptIds[0]);
+        if (matchingDept) {
+          setFormData(prev => ({
+            ...prev,
+            department_id: matchingDept.id
+          }));
+        }
+      }
+    }
+  }, [showCreateModal, departments, user, formData.department_id]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -55,31 +71,10 @@ export default function Groups() {
   };
 
   const handleOpenCreateModal = () => {
-    let defaultDeptId = 0;
-    
-    if (user?.role === 'dept_admin') {
-      // For dept admin, use their first managed department
-      const managedDeptIds = user.managed_department_ids || [];
-      if (managedDeptIds.length > 0 && departments.length > 0) {
-        // Find the matching department to ensure it exists
-        const matchingDept = departments.find(d => d.id === managedDeptIds[0]);
-        if (matchingDept) {
-          defaultDeptId = matchingDept.id;
-        }
-      }
-    }
-    
-    console.log('Opening create modal:', { 
-      defaultDeptId, 
-      departments, 
-      managedDeptIds: user?.managed_department_ids,
-      userRole: user?.role 
-    });
-    
     setFormData({
       name: '',
       description: '',
-      department_id: defaultDeptId,
+      department_id: '',
       member_ids: [],
       leader_ids: []
     });
