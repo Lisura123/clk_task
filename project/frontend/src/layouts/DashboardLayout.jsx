@@ -151,7 +151,7 @@ export default function DashboardLayout() {
     { name: 'Tasks', href: '/dashboard/tasks', icon: ClipboardList, roles: ['super_admin', 'dept_admin'] },
     { name: 'My Tasks', href: '/dashboard/my-tasks', icon: ClipboardList, roles: ['employee'] },
     { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['super_admin', 'dept_admin'] },
-    { name: 'Create Employee', href: '/dashboard/create-employee', icon: UserPlus, roles: ['super_admin', 'dept_admin'] },
+    { name: 'Create Employee', href: '/dashboard/create-employee', icon: UserPlus, roles: ['super_admin'] },
     { name: 'Pending Registrations', href: '/dashboard/pending-registrations', icon: UserCheck, roles: ['super_admin'] },
     { name: 'Departments', href: '/dashboard/departments', icon: Building2, roles: ['super_admin'] },
     { name: 'Groups', href: '/dashboard/groups', icon: Users, roles: ['super_admin', 'dept_admin'] },

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Department;
 use App\Models\Notification;
+use App\Notifications\RegistrationApprovedNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -93,7 +94,14 @@ class UserController extends Controller
 
         $targetUser->update(['status' => 'active']);
 
-        // Notify the user that their registration was approved
+        // Send email notification to the approved user
+        try {
+            $targetUser->notify(new RegistrationApprovedNotification($user->name));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send approval email: ' . $e->getMessage());
+        }
+
+        // Notify the user that their registration was approved (in-app notification)
         Notification::create([
             'user_id' => $targetUser->id,
             'triggered_by_id' => $user->id,

@@ -99,7 +99,7 @@ function App() {
           <Route
             path="dashboard/create-employee"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin']}>
                 <CreateEmployee />
               </ProtectedRoute>
             }

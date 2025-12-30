@@ -54,9 +54,15 @@ export default function Groups() {
   };
 
   const handleOpenCreateModal = () => {
-    const defaultDeptId = user?.role === 'dept_admin' && departments.length > 0 
-      ? departments[0].id 
-      : '';
+    let defaultDeptId = '';
+    
+    if (user?.role === 'dept_admin') {
+      // For dept admin, use their first managed department
+      const managedDeptIds = user.managed_department_ids || [];
+      if (managedDeptIds.length > 0) {
+        defaultDeptId = managedDeptIds[0];
+      }
+    }
     
     setFormData({
       name: '',
@@ -288,7 +294,7 @@ export default function Groups() {
                 </label>
                 <select
                   value={formData.department_id}
-                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value, member_ids: [], leader_ids: [] })}
+                  onChange={(e) => setFormData({ ...formData, department_id: Number(e.target.value), member_ids: [], leader_ids: [] })}
                   disabled={user?.role === 'dept_admin'}
                   className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
                     user?.role === 'dept_admin' ? 'bg-gray-100 cursor-not-allowed' : ''
@@ -302,7 +308,7 @@ export default function Groups() {
                 </select>
                 {user?.role === 'dept_admin' && (
                   <p className="text-blue-600 text-xs mt-1">
-                    You can only create groups in your managed department
+                    This is your managed department and cannot be changed
                   </p>
                 )}
               </div>

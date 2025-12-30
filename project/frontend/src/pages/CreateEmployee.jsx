@@ -27,6 +27,27 @@ export default function CreateEmployee() {
     generatePassword();
   }, []);
 
+  // Auto-set department for dept admins when departments are loaded
+  useEffect(() => {
+    console.log('useEffect triggered');
+    console.log('user role:', user?.role);
+    console.log('departments length:', departments.length);
+    console.log('formData.department:', formData.department);
+    
+    if (user?.role === 'dept_admin' && departments.length > 0) {
+      console.log('Auto-setting department for dept admin');
+      console.log('Departments:', departments);
+      console.log('First department:', departments[0]);
+      console.log('Department name:', departments[0]?.name);
+      
+      // Only set if not already set or if it's empty
+      if (!formData.department || formData.department === '') {
+        console.log('Setting department to:', departments[0].name);
+        setFormData(prev => ({ ...prev, department: departments[0].name }));
+      }
+    }
+  }, [departments, user, formData.department]);
+
   const fetchDepartments = async () => {
     try {
       const response = await departmentAPI.getAllDepartments();
@@ -38,11 +59,6 @@ export default function CreateEmployee() {
         availableDepartments = availableDepartments.filter(dept => 
           managedDeptIds.includes(dept.id)
         );
-        
-        // Auto-select the first department for dept admins (they can't change it)
-        if (availableDepartments.length > 0) {
-          setFormData(prev => ({ ...prev, department: availableDepartments[0].name }));
-        }
       }
       
       setDepartments(availableDepartments);
@@ -110,7 +126,13 @@ export default function CreateEmployee() {
 
     setLoading(true);
     try {
-      const response = await authAPI.adminCreateEmployee(formData);
+      // Ensure department is set for dept admins
+      const submitData = { ...formData };
+      if (user?.role === 'dept_admin' && departments.length > 0 && !submitData.department) {
+        submitData.department = departments[0].name;
+      }
+      
+      const response = await authAPI.adminCreateEmployee(submitData);
       
       if (response.data.success) {
         setCreatedEmployee({
@@ -371,7 +393,9 @@ export default function CreateEmployee() {
                 </label>
                 <select
                   name="department"
-                  value={formData.department}
+                  value={user?.role === 'dept_admin' && departments.length > 0 && !formData.department 
+                    ? departments[0].name 
+                    : formData.department}
                   onChange={handleChange}
                   disabled={user?.role === 'dept_admin'}
                   className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
