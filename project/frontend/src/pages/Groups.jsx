@@ -55,15 +55,26 @@ export default function Groups() {
   };
 
   const handleOpenCreateModal = () => {
-    let defaultDeptId = '';
+    let defaultDeptId = 0;
     
     if (user?.role === 'dept_admin') {
       // For dept admin, use their first managed department
       const managedDeptIds = user.managed_department_ids || [];
-      if (managedDeptIds.length > 0) {
-        defaultDeptId = Number(managedDeptIds[0]);
+      if (managedDeptIds.length > 0 && departments.length > 0) {
+        // Find the matching department to ensure it exists
+        const matchingDept = departments.find(d => d.id === managedDeptIds[0]);
+        if (matchingDept) {
+          defaultDeptId = matchingDept.id;
+        }
       }
     }
+    
+    console.log('Opening create modal:', { 
+      defaultDeptId, 
+      departments, 
+      managedDeptIds: user?.managed_department_ids,
+      userRole: user?.role 
+    });
     
     setFormData({
       name: '',
@@ -333,7 +344,7 @@ export default function Groups() {
                   Department <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={formData.department_id}
+                  value={formData.department_id || ''}
                   onChange={(e) => setFormData({ ...formData, department_id: Number(e.target.value), member_ids: [], leader_ids: [] })}
                   disabled={user?.role === 'dept_admin'}
                   className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
@@ -341,12 +352,12 @@ export default function Groups() {
                   }`}
                   required
                 >
-                  <option value="">Select Department</option>
+                  {user?.role !== 'dept_admin' && <option value="">Select Department</option>}
                   {departments.map(dept => (
                     <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
-                {user?.role === 'dept_admin' && (
+                {user?.role === 'dept_admin' && formData.department_id && (
                   <p className="text-blue-600 text-xs mt-1">
                     This is your managed department and cannot be changed
                   </p>
