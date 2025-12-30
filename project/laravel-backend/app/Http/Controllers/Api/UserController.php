@@ -22,6 +22,13 @@ class UserController extends Controller
         $user = $request->user();
         $query = User::with('departmentRelation');
 
+        \Log::info('UserController index called', [
+            'user_id' => $user->id,
+            'user_role' => $user->role,
+            'is_dept_admin_check' => $user->isDeptAdmin(),
+            'managed_department_ids' => $user->managed_department_ids
+        ]);
+
         // Filter by managed departments for dept admin
         if ($user->isDeptAdmin()) {
             $managedDeptIds = $user->managed_department_ids ?? [];
