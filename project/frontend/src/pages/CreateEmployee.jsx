@@ -134,7 +134,7 @@ export default function CreateEmployee() {
       
       const response = await authAPI.adminCreateEmployee(submitData);
       
-      if (response.data.success) {
+      if (response.data && response.data.data) {
         setCreatedEmployee({
           name: formData.name,
           email: formData.email,

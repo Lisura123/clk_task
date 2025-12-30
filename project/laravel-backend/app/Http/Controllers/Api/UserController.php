@@ -22,10 +22,15 @@ class UserController extends Controller
         $user = $request->user();
         $query = User::with('departmentRelation');
 
-        // Filter by role
+        // Filter by managed departments for dept admin
         if ($user->isDeptAdmin()) {
-            $managedDepts = $user->managed_department_ids ?? [];
-            $query->whereIn('department', $managedDepts);
+            $managedDeptIds = $user->managed_department_ids ?? [];
+            if (!empty($managedDeptIds)) {
+                $query->whereIn('department_id', $managedDeptIds);
+            } else {
+                // If no managed departments, return empty result
+                $query->whereRaw('1 = 0');
+            }
         }
 
         if ($request->has('department')) {
