@@ -27,29 +27,22 @@ export default function Groups() {
     fetchData();
   }, []);
 
-  // Auto-set department for dept admin when departments are loaded
+  // Auto-set department for dept admin when modal opens and departments are loaded
   useEffect(() => {
     if (!showCreateModal) return;
     if (user?.role !== 'dept_admin') return;
     if (departments.length === 0) return;
     if (formData.department_id) return;
 
-    const managedDeptIds = (user?.managed_department_ids ?? [])
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && id > 0);
-
-    if (managedDeptIds.length === 0) return;
-
-    const managedDeptId = managedDeptIds[0];
-    const matchingDept = departments.find((d) => Number(d.id) === managedDeptId);
-
-    if (!matchingDept) return;
-
-    setFormData((prev) => ({
-      ...prev,
-      department_id: Number(matchingDept.id),
-    }));
-  }, [showCreateModal, departments, user?.role, user?.managed_department_ids, formData.department_id]);
+    // For dept admin, just use the first available department (already filtered)
+    const firstDept = departments[0];
+    if (firstDept) {
+      setFormData((prev) => ({
+        ...prev,
+        department_id: Number(firstDept.id),
+      }));
+    }
+  }, [showCreateModal, departments, user?.role, formData.department_id]);
 
   const fetchData = async () => {
     try {
@@ -60,16 +53,37 @@ export default function Groups() {
         userAPI.getAll()
       ]);
 
+      console.log('Groups fetchData:', {
+        user,
+        managedDeptIds: user?.managed_department_ids,
+        allDepts: deptsRes.data,
+        allUsers: usersRes.data.data
+      });
+
       setGroups(groupsRes.data.data || []);
       
       let availableDepartments = deptsRes.data || [];
+      
+      // For dept admin, filter to their managed departments OR their own department
       if (user?.role === 'dept_admin') {
         const managedDeptIds = (user?.managed_department_ids ?? [])
           .map((id) => Number(id))
           .filter((id) => Number.isFinite(id) && id > 0);
 
+        // If no managed_department_ids, use their own department_id
+        const deptIdsToShow = managedDeptIds.length > 0 
+          ? managedDeptIds 
+          : (user?.department_id ? [Number(user.department_id)] : []);
+
+        console.log('Dept admin filtering departments:', { 
+          managedDeptIds, 
+          userDeptId: user?.department_id,
+          deptIdsToShow,
+          availableDepartments 
+        });
+
         availableDepartments = availableDepartments.filter((dept) =>
-          managedDeptIds.includes(Number(dept.id))
+          deptIdsToShow.includes(Number(dept.id))
         );
       }
       setDepartments(availableDepartments);
@@ -82,10 +96,16 @@ export default function Groups() {
   };
 
   const handleOpenCreateModal = () => {
+    // For dept admin, auto-set their department
+    let initialDeptId = '';
+    if (user?.role === 'dept_admin' && departments.length > 0) {
+      initialDeptId = Number(departments[0].id);
+    }
+    
     setFormData({
       name: '',
       description: '',
-      department_id: '',
+      department_id: initialDeptId,
       member_ids: [],
       leader_ids: []
     });
