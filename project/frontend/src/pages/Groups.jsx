@@ -29,19 +29,27 @@ export default function Groups() {
 
   // Auto-set department for dept admin when departments are loaded
   useEffect(() => {
-    if (showCreateModal && user?.role === 'dept_admin' && departments.length > 0 && !formData.department_id) {
-      const managedDeptIds = user.managed_department_ids || [];
-      if (managedDeptIds.length > 0) {
-        const matchingDept = departments.find(d => d.id === managedDeptIds[0]);
-        if (matchingDept) {
-          setFormData(prev => ({
-            ...prev,
-            department_id: matchingDept.id
-          }));
-        }
-      }
-    }
-  }, [showCreateModal, departments, user, formData.department_id]);
+    if (!showCreateModal) return;
+    if (user?.role !== 'dept_admin') return;
+    if (departments.length === 0) return;
+    if (formData.department_id) return;
+
+    const managedDeptIds = (user?.managed_department_ids ?? [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (managedDeptIds.length === 0) return;
+
+    const managedDeptId = managedDeptIds[0];
+    const matchingDept = departments.find((d) => Number(d.id) === managedDeptId);
+
+    if (!matchingDept) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      department_id: Number(matchingDept.id),
+    }));
+  }, [showCreateModal, departments, user?.role, user?.managed_department_ids, formData.department_id]);
 
   const fetchData = async () => {
     try {
@@ -56,9 +64,12 @@ export default function Groups() {
       
       let availableDepartments = deptsRes.data || [];
       if (user?.role === 'dept_admin') {
-        const managedDeptIds = user.managed_department_ids || [];
-        availableDepartments = availableDepartments.filter(dept => 
-          managedDeptIds.includes(dept.id)
+        const managedDeptIds = (user?.managed_department_ids ?? [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0);
+
+        availableDepartments = availableDepartments.filter((dept) =>
+          managedDeptIds.includes(Number(dept.id))
         );
       }
       setDepartments(availableDepartments);
@@ -191,7 +202,7 @@ export default function Groups() {
   });
 
   const availableEmployees = formData.department_id
-    ? employees.filter(emp => emp.department_id === parseInt(formData.department_id))
+    ? employees.filter((emp) => Number(emp.department_id) === Number(formData.department_id))
     : [];
 
   const filteredAvailableEmployees = availableEmployees.filter(emp =>
