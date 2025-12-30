@@ -27,14 +27,21 @@ class UserController extends Controller
             $managedDeptIds = $user->managed_department_ids ?? [];
             \Log::info('Dept Admin filtering users', [
                 'user_id' => $user->id,
+                'user_name' => $user->name,
                 'user_role' => $user->role,
-                'managed_department_ids' => $managedDeptIds
+                'managed_department_ids' => $managedDeptIds,
+                'managed_department_ids_type' => gettype($managedDeptIds)
             ]);
             
             if (!empty($managedDeptIds)) {
                 $query->whereIn('department_id', $managedDeptIds);
+                
+                // Log the SQL query
+                \Log::info('SQL Query: ' . $query->toSql());
+                \Log::info('Query Bindings: ', $query->getBindings());
             } else {
                 // If no managed departments, return empty result
+                \Log::warning('Dept admin has no managed departments');
                 $query->whereRaw('1 = 0');
             }
         }
@@ -53,7 +60,20 @@ class UserController extends Controller
 
         $users = $query->latest()->paginate($request->get('per_page', 15));
         
-        \Log::info('Users fetched', ['count' => $users->count()]);
+        \Log::info('Users fetched', [
+            'count' => $users->count(),
+            'total' => $users->total()
+        ]);
+        
+        // Log first user if exists
+        if ($users->count() > 0) {
+            \Log::info('First user sample:', [
+                'id' => $users[0]->id,
+                'name' => $users[0]->name,
+                'department_id' => $users[0]->department_id,
+                'department' => $users[0]->department
+            ]);
+        }
         
         // Add department_name to each user for easier frontend access
         $users->getCollection()->transform(function ($user) {
