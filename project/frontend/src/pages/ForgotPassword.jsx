@@ -62,19 +62,6 @@ const ForgotPassword = () => {
                 <p className="text-sm text-green-700 mt-1">
                   Check your email for the password reset link.
                 </p>
-                {resetToken && (
-                  <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
-                    <p className="text-xs text-yellow-800 font-medium mb-1">
-                      Development Mode - Token:
-                    </p>
-                    <code className="text-xs text-yellow-900 break-all">
-                      {resetToken}
-                    </code>
-                    <p className="text-xs text-yellow-700 mt-1">
-                      Use this token on the reset password page
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
           </div>

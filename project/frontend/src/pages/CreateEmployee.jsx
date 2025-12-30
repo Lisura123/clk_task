@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { UserPlus, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
 import { authAPI, departmentAPI } from '../services/api';
+import useAuthStore from '../store/authStore';
 
 export default function CreateEmployee() {
+  const { user } = useAuthStore();
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -11,6 +13,7 @@ export default function CreateEmployee() {
   const [createdEmployee, setCreatedEmployee] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
+    username: '',
     email: '',
     password: '',
     department: '',
@@ -27,7 +30,22 @@ export default function CreateEmployee() {
   const fetchDepartments = async () => {
     try {
       const response = await departmentAPI.getAllDepartments();
-      setDepartments(response.data || []);
+      let availableDepartments = response.data || [];
+      
+      // Filter departments for dept admins
+      if (user?.role === 'dept_admin') {
+        const managedDeptIds = user.managed_department_ids || [];
+        availableDepartments = availableDepartments.filter(dept => 
+          managedDeptIds.includes(dept.id)
+        );
+        
+        // Auto-select department if only one is managed
+        if (availableDepartments.length === 1) {
+          setFormData(prev => ({ ...prev, department: availableDepartments[0].name }));
+        }
+      }
+      
+      setDepartments(availableDepartments);
     } catch (error) {
       console.error('Error fetching departments:', error);
       setErrors({ department: 'Failed to load departments' });
@@ -51,6 +69,12 @@ export default function CreateEmployee() {
       newErrors.name = 'Name is required';
     } else if (!/^[a-zA-Z\s\-\.]+$/.test(formData.name.trim())) {
       newErrors.name = 'Name can only contain letters, spaces, hyphens, and periods';
+    }
+
+    if (!formData.username.trim()) {
+      newErrors.username = 'Username is required';
+    } else if (formData.username.length < 3) {
+      newErrors.username = 'Username must be at least 3 characters';
     }
 
     if (!formData.email.trim()) {
@@ -102,6 +126,7 @@ export default function CreateEmployee() {
         // Reset form
         setFormData({
           name: '',
+          username: '',
           email: '',
           password: '',
           department: '',
@@ -276,6 +301,26 @@ export default function CreateEmployee() {
                 )}
               </div>
 
+              {/* Username */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Username <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="username"
+                  value={formData.username}
+                  onChange={handleChange}
+                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                    errors.username ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  placeholder="Enter username for login"
+                />
+                {errors.username && (
+                  <p className="text-red-600 text-sm mt-1">{errors.username}</p>
+                )}
+              </div>
+
               {/* Email */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -328,9 +373,10 @@ export default function CreateEmployee() {
                   name="department"
                   value={formData.department}
                   onChange={handleChange}
+                  disabled={user?.role === 'dept_admin' && departments.length === 1}
                   className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
                     errors.department ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  } ${user?.role === 'dept_admin' && departments.length === 1 ? 'bg-gray-100' : ''}`}
                 >
                   <option value="">Select Department</option>
                   {departments.map((dept) => (
@@ -341,6 +387,11 @@ export default function CreateEmployee() {
                 </select>
                 {errors.department && (
                   <p className="text-red-600 text-sm mt-1">{errors.department}</p>
+                )}
+                {user?.role === 'dept_admin' && (
+                  <p className="text-gray-600 text-xs mt-1">
+                    You can only create employees in your managed departments
+                  </p>
                 )}
               </div>
 
@@ -356,9 +407,14 @@ export default function CreateEmployee() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
                   <option value="employee">Employee</option>
-                  <option value="dept_admin">Department Admin</option>
-                  <option value="super_admin">Super Admin</option>
+                  {user?.role === 'super_admin' && <option value="dept_admin">Department Admin</option>}
+                  {user?.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
                 </select>
+                {user?.role === 'dept_admin' && (
+                  <p className="text-gray-600 text-xs mt-1">
+                    Department admins can only create regular employees
+                  </p>
+                )}
               </div>
 
               {/* Password */}
@@ -413,6 +469,7 @@ export default function CreateEmployee() {
               onClick={() => {
                 setFormData({
                   name: '',
+                  username: '',
                   email: '',
                   password: '',
                   department: '',

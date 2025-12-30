@@ -61,9 +61,10 @@ class UserResource extends Resource
                                 'dept_admin' => 'Department Admin',
                                 'employee' => 'Employee',
                             ])
+                            ->live()
                             ->native(false),
                         Forms\Components\Select::make('department_id')
-                            ->label('Department')
+                            ->label('Primary Department')
                             ->relationship('departmentRelation', 'name')
                             ->searchable()
                             ->preload()
@@ -74,6 +75,17 @@ class UserResource extends Resource
                                 Forms\Components\Textarea::make('description')
                                     ->maxLength(500),
                             ]),
+                        Forms\Components\Select::make('managed_department_ids')
+                            ->label('Managed Departments (Dept Admin Only)')
+                            ->multiple()
+                            ->relationship('departmentRelation', 'name')
+                            ->options(function () {
+                                return \App\Models\Department::pluck('name', 'id');
+                            })
+                            ->searchable()
+                            ->preload()
+                            ->visible(fn (Forms\Get $get) => $get('role') === 'dept_admin')
+                            ->helperText('Select all departments this admin can manage'),
                         Forms\Components\Select::make('status')
                             ->required()
                             ->options([
@@ -83,7 +95,7 @@ class UserResource extends Resource
                             ])
                             ->default('pending')
                             ->native(false),
-                    ])->columns(3),
+                    ])->columns(2),
                     
                 Forms\Components\Section::make('Password')
                     ->schema([

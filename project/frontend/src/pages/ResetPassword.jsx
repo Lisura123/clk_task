@@ -123,22 +123,12 @@ const ResetPassword = () => {
             />
           </div>
 
-          {/* Token */}
-          <div>
-            <label htmlFor="token" className="block text-sm font-medium text-black mb-2">
-              Reset Token
-            </label>
-            <input
-              id="token"
-              type="text"
-              name="token"
-              value={formData.token}
-              onChange={handleChange}
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent font-mono text-sm"
-              placeholder="Enter reset token from email"
-            />
-          </div>
+          {/* Token (hidden - from URL) */}
+          <input
+            type="hidden"
+            name="token"
+            value={formData.token}
+          />
 
           {/* New Password */}
           <div>

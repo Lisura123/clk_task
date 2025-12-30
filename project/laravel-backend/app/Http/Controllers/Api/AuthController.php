@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Notifications\ResetPasswordNotification;
 
 class AuthController extends Controller
 {
@@ -219,12 +220,15 @@ class AuthController extends Controller
             'created_at' => now(),
         ]);
 
-        // In production, send email with reset link
-        // For now, return the token (remove this in production!)
+        // Send password reset email
+        try {
+            $user->notify(new ResetPasswordNotification($token, $request->email));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send password reset email: ' . $e->getMessage());
+        }
+
         return response()->json([
             'message' => 'Password reset link has been sent to your email.',
-            'token' => $token, // Remove this in production
-            'email' => $request->email,
         ]);
     }
 
