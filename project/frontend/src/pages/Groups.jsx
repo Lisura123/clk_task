@@ -61,7 +61,7 @@ export default function Groups() {
       // For dept admin, use their first managed department
       const managedDeptIds = user.managed_department_ids || [];
       if (managedDeptIds.length > 0) {
-        defaultDeptId = managedDeptIds[0];
+        defaultDeptId = Number(managedDeptIds[0]);
       }
     }
     
