@@ -14,6 +14,7 @@ export default function Groups() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState(null);
+  const [memberSearchTerm, setMemberSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -71,6 +72,7 @@ export default function Groups() {
       member_ids: [],
       leader_ids: []
     });
+    setMemberSearchTerm('');
     setShowCreateModal(true);
   };
 
@@ -83,6 +85,7 @@ export default function Groups() {
       member_ids: group.members.map(m => m.id),
       leader_ids: group.members.filter(m => m.pivot.role === 'leader').map(m => m.id)
     });
+    setMemberSearchTerm('');
     setShowEditModal(true);
   };
 
@@ -125,12 +128,22 @@ export default function Groups() {
   };
 
   const toggleMember = (userId) => {
-    setFormData(prev => ({
-      ...prev,
-      member_ids: prev.member_ids.includes(userId)
+    setFormData(prev => {
+      const newMemberIds = prev.member_ids.includes(userId)
         ? prev.member_ids.filter(id => id !== userId)
-        : [...prev.member_ids, userId]
-    }));
+        : [...prev.member_ids, userId];
+      
+      // If unchecking a member who is a leader, remove them from leaders too
+      const newLeaderIds = prev.member_ids.includes(userId)
+        ? prev.leader_ids.filter(id => id !== userId)
+        : prev.leader_ids;
+      
+      return {
+        ...prev,
+        member_ids: newMemberIds,
+        leader_ids: newLeaderIds
+      };
+    });
   };
 
   const toggleLeader = (userId) => {
@@ -139,6 +152,29 @@ export default function Groups() {
       leader_ids: prev.leader_ids.includes(userId)
         ? prev.leader_ids.filter(id => id !== userId)
         : [...prev.leader_ids, userId]
+    }));
+  };
+
+  const selectAllMembers = () => {
+    const filteredEmployeeIds = filteredAvailableEmployees.map(emp => emp.id);
+    setFormData(prev => ({
+      ...prev,
+      member_ids: filteredEmployeeIds
+    }));
+  };
+
+  const clearAllMembers = () => {
+    setFormData(prev => ({
+      ...prev,
+      member_ids: [],
+      leader_ids: []
+    }));
+  };
+
+  const makeAllLeaders = () => {
+    setFormData(prev => ({
+      ...prev,
+      leader_ids: [...prev.member_ids]
     }));
   };
 
@@ -151,6 +187,10 @@ export default function Groups() {
   const availableEmployees = formData.department_id
     ? employees.filter(emp => emp.department_id === parseInt(formData.department_id))
     : [];
+
+  const filteredAvailableEmployees = availableEmployees.filter(emp =>
+    (emp.name || emp.username || '').toLowerCase().includes(memberSearchTerm.toLowerCase())
+  );
 
   return (
     <div>
@@ -314,41 +354,102 @@ export default function Groups() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Members <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Select Members <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs text-gray-500">
+                      ({formData.member_ids.length} selected, {formData.leader_ids.length} leader{formData.leader_ids.length !== 1 ? 's' : ''})
+                    </span>
+                  </label>
+                  {availableEmployees.length > 0 && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={selectAllMembers}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        Select All
+                      </button>
+                      <span className="text-gray-300">|</span>
+                      <button
+                        type="button"
+                        onClick={clearAllMembers}
+                        className="text-xs text-red-600 hover:text-red-700 font-medium"
+                      >
+                        Clear All
+                      </button>
+                      {formData.member_ids.length > 0 && (
+                        <>
+                          <span className="text-gray-300">|</span>
+                          <button
+                            type="button"
+                            onClick={makeAllLeaders}
+                            className="text-xs text-green-600 hover:text-green-700 font-medium"
+                          >
+                            All Leaders
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                {availableEmployees.length > 0 && (
+                  <div className="mb-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search members..."
+                        value={memberSearchTerm}
+                        onChange={(e) => setMemberSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="border border-gray-300 rounded-lg p-3 max-h-60 overflow-y-auto bg-gray-50">
                   {availableEmployees.length > 0 ? (
-                    availableEmployees.map(emp => (
-                      <div key={emp.id} className="flex items-center justify-between p-2 hover:bg-white rounded">
-                        <label className="flex items-center gap-2 cursor-pointer flex-1">
-                          <input
-                            type="checkbox"
-                            checked={formData.member_ids.includes(emp.id)}
-                            onChange={() => toggleMember(emp.id)}
-                            className="w-4 h-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                          />
-                          <span className="text-sm text-gray-700">{emp.name || emp.username}</span>
-                        </label>
-                        {formData.member_ids.includes(emp.id) && (
-                          <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    filteredAvailableEmployees.length > 0 ? (
+                      filteredAvailableEmployees.map(emp => (
+                        <div key={emp.id} className="flex items-center justify-between p-2 hover:bg-white rounded">
+                          <label className="flex items-center gap-2 cursor-pointer flex-1">
                             <input
                               type="checkbox"
-                              checked={formData.leader_ids.includes(emp.id)}
-                              onChange={() => toggleLeader(emp.id)}
-                              className="w-3 h-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              checked={formData.member_ids.includes(emp.id)}
+                              onChange={() => toggleMember(emp.id)}
+                              className="w-4 h-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
                             />
-                            Leader
+                            <div className="flex flex-col">
+                              <span className="text-sm text-gray-700">{emp.name || emp.username}</span>
+                              <span className="text-xs text-gray-500">{emp.role}</span>
+                            </div>
                           </label>
-                        )}
-                      </div>
-                    ))
+                          {formData.member_ids.includes(emp.id) && (
+                            <label className="flex items-center gap-1 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={formData.leader_ids.includes(emp.id)}
+                                onChange={() => toggleLeader(emp.id)}
+                                className="w-3 h-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                              />
+                              <span className={formData.leader_ids.includes(emp.id) ? 'text-blue-600 font-medium' : 'text-gray-600'}>
+                                Leader
+                              </span>
+                            </label>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500 text-center py-4">No members match your search</p>
+                    )
                   ) : (
                     <p className="text-sm text-gray-500">Select a department first</p>
                   )}
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Select members and optionally mark some as leaders
+                  Minimum 2 members required. At least 1 leader must be selected.
                 </p>
               </div>
 
@@ -362,8 +463,19 @@ export default function Groups() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                  disabled={formData.member_ids.length === 0}
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
+                    formData.member_ids.length >= 2 && formData.leader_ids.length >= 1
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                  disabled={formData.member_ids.length < 2 || formData.leader_ids.length < 1}
+                  title={
+                    formData.member_ids.length < 2
+                      ? 'At least 2 members required'
+                      : formData.leader_ids.length < 1
+                      ? 'At least 1 leader required'
+                      : ''
+                  }
                 >
                   Create Group
                 </button>
@@ -425,35 +537,95 @@ export default function Groups() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Members <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Select Members <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs text-gray-500">
+                      ({formData.member_ids.length} selected, {formData.leader_ids.length} leader{formData.leader_ids.length !== 1 ? 's' : ''})
+                    </span>
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllMembers}
+                      className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Select All
+                    </button>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      type="button"
+                      onClick={clearAllMembers}
+                      className="text-xs text-red-600 hover:text-red-700 font-medium"
+                    >
+                      Clear All
+                    </button>
+                    {formData.member_ids.length > 0 && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <button
+                          type="button"
+                          onClick={makeAllLeaders}
+                          className="text-xs text-green-600 hover:text-green-700 font-medium"
+                        >
+                          All Leaders
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search members..."
+                      value={memberSearchTerm}
+                      onChange={(e) => setMemberSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+
                 <div className="border border-gray-300 rounded-lg p-3 max-h-60 overflow-y-auto bg-gray-50">
-                  {availableEmployees.map(emp => (
-                    <div key={emp.id} className="flex items-center justify-between p-2 hover:bg-white rounded">
-                      <label className="flex items-center gap-2 cursor-pointer flex-1">
-                        <input
-                          type="checkbox"
-                          checked={formData.member_ids.includes(emp.id)}
-                          onChange={() => toggleMember(emp.id)}
-                          className="w-4 h-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
-                        />
-                        <span className="text-sm text-gray-700">{emp.name || emp.username}</span>
-                      </label>
-                      {formData.member_ids.includes(emp.id) && (
-                        <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                  {filteredAvailableEmployees.length > 0 ? (
+                    filteredAvailableEmployees.map(emp => (
+                      <div key={emp.id} className="flex items-center justify-between p-2 hover:bg-white rounded">
+                        <label className="flex items-center gap-2 cursor-pointer flex-1">
                           <input
                             type="checkbox"
-                            checked={formData.leader_ids.includes(emp.id)}
-                            onChange={() => toggleLeader(emp.id)}
-                            className="w-3 h-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            checked={formData.member_ids.includes(emp.id)}
+                            onChange={() => toggleMember(emp.id)}
+                            className="w-4 h-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
                           />
-                          Leader
+                          <div className="flex flex-col">
+                            <span className="text-sm text-gray-700">{emp.name || emp.username}</span>
+                            <span className="text-xs text-gray-500">{emp.role}</span>
+                          </div>
                         </label>
-                      )}
-                    </div>
-                  ))}
+                        {formData.member_ids.includes(emp.id) && (
+                          <label className="flex items-center gap-1 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formData.leader_ids.includes(emp.id)}
+                              onChange={() => toggleLeader(emp.id)}
+                              className="w-3 h-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            />
+                            <span className={formData.leader_ids.includes(emp.id) ? 'text-blue-600 font-medium' : 'text-gray-600'}>
+                              Leader
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500 text-center py-4">No members match your search</p>
+                  )}
                 </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Minimum 2 members required. At least 1 leader must be selected.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-gray-200">
@@ -466,8 +638,19 @@ export default function Groups() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                  disabled={formData.member_ids.length === 0}
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
+                    formData.member_ids.length >= 2 && formData.leader_ids.length >= 1
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                  disabled={formData.member_ids.length < 2 || formData.leader_ids.length < 1}
+                  title={
+                    formData.member_ids.length < 2
+                      ? 'At least 2 members required'
+                      : formData.leader_ids.length < 1
+                      ? 'At least 1 leader required'
+                      : ''
+                  }
                 >
                   Update Group
                 </button>

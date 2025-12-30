@@ -58,21 +58,45 @@ class GroupController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
+            'description' => 'nullable|string|max:1000',
             'department_id' => 'required|exists:departments,id',
-            'member_ids' => 'required|array|min:1',
+            'member_ids' => 'required|array|min:2|max:50',
             'member_ids.*' => 'exists:users,id',
-            'leader_ids' => 'nullable|array',
+            'leader_ids' => 'required|array|min:1',
             'leader_ids.*' => 'exists:users,id',
+        ], [
+            'member_ids.min' => 'A group must have at least 2 members',
+            'member_ids.max' => 'A group cannot have more than 50 members',
+            'leader_ids.required' => 'A group must have at least one leader',
+            'leader_ids.min' => 'A group must have at least one leader',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        // Check if group name already exists in this department
+        $existingGroup = Group::where('department_id', $request->department_id)
+            ->where('name', $request->name)
+            ->first();
+        
+        if ($existingGroup) {
+            return response()->json([
+                'message' => 'A group with this name already exists in this department'
+            ], 422);
+        }
+
         // Check if dept admin can create group in this department
         if ($user->isDeptAdmin() && !$user->managesDepartment($request->department_id)) {
             return response()->json(['message' => 'You cannot create groups in this department'], 403);
+        }
+
+        // Verify all leader_ids are in member_ids
+        $invalidLeaders = array_diff($request->leader_ids ?? [], $request->member_ids);
+        if (!empty($invalidLeaders)) {
+            return response()->json([
+                'message' => 'All leaders must be members of the group'
+            ], 422);
         }
 
         // Verify all members belong to the department
@@ -153,16 +177,44 @@ class GroupController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
-            'description' => 'nullable|string',
-            'member_ids' => 'sometimes|array|min:1',
+            'description' => 'nullable|string|max:1000',
+            'member_ids' => 'sometimes|array|min:2|max:50',
             'member_ids.*' => 'exists:users,id',
-            'leader_ids' => 'nullable|array',
+            'leader_ids' => 'sometimes|array|min:1',
             'leader_ids.*' => 'exists:users,id',
             'is_active' => 'sometimes|boolean',
+        ], [
+            'member_ids.min' => 'A group must have at least 2 members',
+            'member_ids.max' => 'A group cannot have more than 50 members',
+            'leader_ids.min' => 'A group must have at least one leader',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        // Check if name is being updated and if it conflicts
+        if ($request->has('name') && $request->name !== $group->name) {
+            $existingGroup = Group::where('department_id', $group->department_id)
+                ->where('name', $request->name)
+                ->where('id', '!=', $id)
+                ->first();
+            
+            if ($existingGroup) {
+                return response()->json([
+                    'message' => 'A group with this name already exists in this department'
+                ], 422);
+            }
+        }
+
+        // Verify all leader_ids are in member_ids if both are provided
+        if ($request->has('member_ids') && $request->has('leader_ids')) {
+            $invalidLeaders = array_diff($request->leader_ids ?? [], $request->member_ids);
+            if (!empty($invalidLeaders)) {
+                return response()->json([
+                    'message' => 'All leaders must be members of the group'
+                ], 422);
+            }
         }
 
         // Update basic info
