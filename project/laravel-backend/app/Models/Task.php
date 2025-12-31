@@ -124,6 +124,14 @@ class Task extends Model
     }
 
     /**
+     * Get daily work logs for this task
+     */
+    public function workLogs(): HasMany
+    {
+        return $this->hasMany(DailyWorkLog::class);
+    }
+
+    /**
      * Scope for active tasks (not archived)
      */
     public function scopeActive($query)

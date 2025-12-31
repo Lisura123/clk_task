@@ -1,0 +1,804 @@
+import { useState, useEffect } from 'react';
+import { 
+  Plus, 
+  Search, 
+  Edit2, 
+  Trash2, 
+  FileText, 
+  Calendar, 
+  Users,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  AlertCircle,
+  CheckCircle,
+  Archive,
+  X,
+  MessageCircle,
+  MapPin,
+  User,
+  Repeat,
+  List,
+  Grid3X3,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays
+} from 'lucide-react';
+import { groupPlanAPI, groupAPI, scheduledPlanAPI, departmentAPI } from '../services/api';
+import useAuthStore from '../store/authStore';
+import GroupChat from '../components/GroupChat';
+
+export default function GroupPlans() {
+  const { user } = useAuthStore();
+  const [activeTab, setActiveTab] = useState('group-plans'); // 'group-plans' or 'schedules'
+  
+  // Group Plans State
+  const [plans, setPlans] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [expandedPlan, setExpandedPlan] = useState(null);
+  const [chatGroup, setChatGroup] = useState(null);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    content: '',
+    group_id: '',
+    status: 'draft',
+    priority: 'medium',
+    start_date: '',
+    end_date: ''
+  });
+
+  // Schedule State
+  const [scheduledPlans, setScheduledPlans] = useState([]);
+  const [calendarData, setCalendarData] = useState({});
+  const [departments, setDepartments] = useState([]);
+  const [departmentUsers, setDepartmentUsers] = useState([]);
+  const [scheduleViewMode, setScheduleViewMode] = useState('calendar'); // 'calendar' or 'list'
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [showScheduleCreateModal, setShowScheduleCreateModal] = useState(false);
+  const [showScheduleEditModal, setShowScheduleEditModal] = useState(false);
+  const [showScheduleViewModal, setShowScheduleViewModal] = useState(false);
+  const [selectedSchedule, setSelectedSchedule] = useState(null);
+  const [scheduleFormData, setScheduleFormData] = useState({
+    title: '',
+    description: '',
+    department_id: '',
+    assigned_to: '',
+    scheduled_date: '',
+    start_time: '',
+    end_time: '',
+    type: 'task',
+    status: 'pending',
+    priority: 'medium',
+    is_recurring: false,
+    recurrence_pattern: '',
+    recurrence_end_date: '',
+    notes: '',
+    location: ''
+  });
+
+  const canManagePlans = user?.role === 'super_admin' || user?.role === 'dept_admin';
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [plansRes, groupsRes] = await Promise.all([
+        groupPlanAPI.getMyPlans(),
+        groupAPI.getAll()
+      ]);
+
+      setPlans(plansRes.data || []);
+      setGroups(groupsRes.data.data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenCreateModal = () => {
+    if (groups.length === 0) {
+      alert('No groups available. Please create a group first.');
+      return;
+    }
+    setFormData({
+      title: '',
+      description: '',
+      content: '',
+      group_id: groups[0]?.id || '',
+      status: 'draft',
+      priority: 'medium',
+      start_date: '',
+      end_date: ''
+    });
+    setShowCreateModal(true);
+  };
+
+  const handleEdit = (plan) => {
+    setSelectedPlan(plan);
+    setFormData({
+      title: plan.title,
+      description: plan.description || '',
+      content: plan.content,
+      group_id: plan.group_id,
+      status: plan.status,
+      priority: plan.priority,
+      start_date: plan.start_date ? plan.start_date.split('T')[0] : '',
+      end_date: plan.end_date ? plan.end_date.split('T')[0] : ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleView = (plan) => {
+    setSelectedPlan(plan);
+    setShowViewModal(true);
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    try {
+      await groupPlanAPI.create(formData.group_id, formData);
+      setShowCreateModal(false);
+      fetchData();
+    } catch (error) {
+      console.error('Error creating plan:', error);
+      const errorMsg = error.response?.data?.message || 'Failed to create plan';
+      alert(errorMsg);
+    }
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    try {
+      await groupPlanAPI.update(selectedPlan.group_id, selectedPlan.id, formData);
+      setShowEditModal(false);
+      setSelectedPlan(null);
+      fetchData();
+    } catch (error) {
+      console.error('Error updating plan:', error);
+      const errorMsg = error.response?.data?.message || 'Failed to update plan';
+      alert(errorMsg);
+    }
+  };
+
+  const handleDelete = async (plan) => {
+    if (!confirm('Are you sure you want to delete this plan?')) return;
+    try {
+      await groupPlanAPI.delete(plan.group_id, plan.id);
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting plan:', error);
+      alert('Failed to delete plan');
+    }
+  };
+
+  const filteredPlans = plans.filter(plan => {
+    const matchesSearch = plan.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (plan.description && plan.description.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesStatus = statusFilter === 'all' || plan.status === statusFilter;
+    const matchesGroup = groupFilter === 'all' || plan.group_id.toString() === groupFilter;
+    return matchesSearch && matchesStatus && matchesGroup;
+  });
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'published': return 'bg-green-100 text-green-800';
+      case 'draft': return 'bg-yellow-100 text-yellow-800';
+      case 'archived': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'published': return <CheckCircle className="w-4 h-4" />;
+      case 'draft': return <AlertCircle className="w-4 h-4" />;
+      case 'archived': return <Archive className="w-4 h-4" />;
+      default: return null;
+    }
+  };
+
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'high': return 'bg-red-100 text-red-800';
+      case 'medium': return 'bg-orange-100 text-orange-800';
+      case 'low': return 'bg-blue-100 text-blue-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">Group Plans</h1>
+        <p className="text-gray-600">View and manage plans shared within your groups</p>
+      </div>
+
+      {/* Filters and Search */}
+      <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+        <div className="flex flex-wrap gap-4 items-center justify-between">
+          <div className="flex flex-wrap gap-4 items-center">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search plans..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+              />
+            </div>
+
+            {/* Group Filter */}
+            <select
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value)}
+              className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Groups</option>
+              {groups.map(group => (
+                <option key={group.id} value={group.id}>{group.name}</option>
+              ))}
+            </select>
+
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Status</option>
+              <option value="published">Published</option>
+              {canManagePlans && <option value="draft">Draft</option>}
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+
+          {/* Create Button - Only for admin/dept_admin */}
+          {canManagePlans && (
+            <button
+              onClick={handleOpenCreateModal}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              Create Plan
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* My Groups Section with Chat */}
+      {groups.length > 0 && (
+        <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+            <Users className="w-5 h-5" />
+            My Groups
+          </h2>
+          <div className="flex flex-wrap gap-3">
+            {groups.map(group => (
+              <button
+                key={group.id}
+                onClick={() => setChatGroup(group)}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>{group.name}</span>
+                <span className="text-xs text-gray-500">({group.members?.length || 0} members)</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Plans Grid */}
+      {filteredPlans.length === 0 ? (
+        <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
+          <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No plans found</h3>
+          <p className="text-gray-500">
+            {canManagePlans
+              ? "Create your first plan to share with your groups."
+              : "No plans have been shared with your groups yet."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredPlans.map(plan => (
+            <div
+              key={plan.id}
+              className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow"
+            >
+              <div className="p-4">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 text-lg mb-1">{plan.title}</h3>
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Users className="w-4 h-4" />
+                      <span>{plan.group?.name || 'Unknown Group'}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(plan.status)}`}>
+                      {getStatusIcon(plan.status)}
+                      {plan.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Priority Badge */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(plan.priority)}`}>
+                    {plan.priority} priority
+                  </span>
+                </div>
+
+                {/* Description */}
+                {plan.description && (
+                  <p className="text-gray-600 text-sm mb-3 line-clamp-2">{plan.description}</p>
+                )}
+
+                {/* Dates */}
+                <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
+                  {(plan.start_date || plan.end_date) && (
+                    <div className="flex items-center gap-1">
+                      <Calendar className="w-4 h-4" />
+                      <span>
+                        {plan.start_date && formatDate(plan.start_date)}
+                        {plan.start_date && plan.end_date && ' - '}
+                        {plan.end_date && formatDate(plan.end_date)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Expandable Content */}
+                {expandedPlan === plan.id && (
+                  <div className="mt-3 pt-3 border-t">
+                    <h4 className="font-medium text-gray-900 mb-2">Content:</h4>
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-3 rounded-lg max-h-48 overflow-y-auto">
+                      {plan.content}
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center justify-between mt-4 pt-3 border-t">
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <Clock className="w-4 h-4" />
+                    <span>By {plan.creator?.name || 'Unknown'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setExpandedPlan(expandedPlan === plan.id ? null : plan.id)}
+                      className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                      title={expandedPlan === plan.id ? 'Collapse' : 'Expand'}
+                    >
+                      {expandedPlan === plan.id ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleView(plan)}
+                      className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="View Details"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {canManagePlans && (
+                      <>
+                        <button
+                          onClick={() => handleEdit(plan)}
+                          className="p-2 text-green-500 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(plan)}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Create New Plan</h2>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Group *</label>
+                <select
+                  value={formData.group_id}
+                  onChange={(e) => setFormData({ ...formData, group_id: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                >
+                  {groups.map(group => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.start_date}
+                    onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={formData.end_date}
+                    onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={2}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Brief description of the plan..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Content *</label>
+                <textarea
+                  value={formData.content}
+                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                  rows={6}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Detailed plan content..."
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Create Plan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Edit Plan</h2>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdate} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Group</label>
+                <select
+                  value={formData.group_id}
+                  onChange={(e) => setFormData({ ...formData, group_id: e.target.value })}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-100"
+                  disabled
+                >
+                  {groups.map(group => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.start_date}
+                    onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={formData.end_date}
+                    onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={2}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Brief description of the plan..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Content *</label>
+                <textarea
+                  value={formData.content}
+                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                  rows={6}
+                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Detailed plan content..."
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Update Plan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Modal */}
+      {showViewModal && selectedPlan && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Plan Details</h2>
+              <button
+                onClick={() => setShowViewModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">{selectedPlan.title}</h3>
+                <div className="flex items-center gap-3 mt-2">
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedPlan.status)}`}>
+                    {getStatusIcon(selectedPlan.status)}
+                    {selectedPlan.status}
+                  </span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(selectedPlan.priority)}`}>
+                    {selectedPlan.priority} priority
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  <span>Group: {selectedPlan.group?.name || 'Unknown'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  <span>Created by: {selectedPlan.creator?.name || 'Unknown'}</span>
+                </div>
+              </div>
+
+              {(selectedPlan.start_date || selectedPlan.end_date) && (
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Calendar className="w-4 h-4" />
+                  <span>
+                    {selectedPlan.start_date && `From: ${formatDate(selectedPlan.start_date)}`}
+                    {selectedPlan.start_date && selectedPlan.end_date && ' - '}
+                    {selectedPlan.end_date && `To: ${formatDate(selectedPlan.end_date)}`}
+                  </span>
+                </div>
+              )}
+
+              {selectedPlan.description && (
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Description</h4>
+                  <p className="text-gray-700">{selectedPlan.description}</p>
+                </div>
+              )}
+
+              <div>
+                <h4 className="font-medium text-gray-900 mb-2">Content</h4>
+                <div className="text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded-lg">
+                  {selectedPlan.content}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={() => setShowViewModal(false)}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                >
+                  Close
+                </button>
+                {canManagePlans && (
+                  <button
+                    onClick={() => {
+                      setShowViewModal(false);
+                      handleEdit(selectedPlan);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Edit Plan
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group Chat Modal */}
+      {chatGroup && (
+        <GroupChat group={chatGroup} onClose={() => setChatGroup(null)} />
+      )}
+    </div>
+  );
+}

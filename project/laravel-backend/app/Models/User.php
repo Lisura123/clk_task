@@ -119,6 +119,16 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Get groups this user belongs to
+     */
+    public function groups()
+    {
+        return $this->belongsToMany(Group::class, 'group_members')
+            ->withPivot('role')
+            ->withTimestamps();
+    }
+
+    /**
      * Check if user is super admin
      */
     public function isSuperAdmin(): bool
@@ -144,8 +154,9 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * Check if user manages a specific department
+     * @param string|int $departmentIdentifier - Can be department name or ID
      */
-    public function managesDepartment(string $departmentName): bool
+    public function managesDepartment($departmentIdentifier): bool
     {
         if (!$this->isDeptAdmin()) {
             return false;
@@ -153,17 +164,35 @@ class User extends Authenticatable implements FilamentUser
 
         $managedDepts = $this->managed_department_ids ?? [];
         
-        // Check if the department name is directly in the array
-        if (in_array($departmentName, $managedDepts)) {
-            return true;
+        // If managed_department_ids is empty, fall back to user's own department_id
+        if (empty($managedDepts) && $this->department_id) {
+            $managedDepts = [$this->department_id];
         }
         
-        // If the input is numeric (department ID), find its name and check
-        if (is_numeric($departmentName)) {
-            $department = Department::find((int)$departmentName);
-            if ($department) {
-                return in_array($department->name, $managedDepts);
+        if (empty($managedDepts)) {
+            return false;
+        }
+        
+        // Convert all managed dept values to integers for comparison
+        $managedDeptIds = array_map(function($val) {
+            if (is_numeric($val)) {
+                return (int)$val;
             }
+            // If it's a name, look up the ID
+            $dept = Department::where('name', $val)->first();
+            return $dept ? $dept->id : null;
+        }, $managedDepts);
+        $managedDeptIds = array_filter($managedDeptIds);
+        
+        // If input is numeric, check directly against IDs
+        if (is_numeric($departmentIdentifier)) {
+            return in_array((int)$departmentIdentifier, $managedDeptIds);
+        }
+        
+        // If input is a name, look up the ID and check
+        $department = Department::where('name', $departmentIdentifier)->first();
+        if ($department) {
+            return in_array($department->id, $managedDeptIds);
         }
         
         return false;

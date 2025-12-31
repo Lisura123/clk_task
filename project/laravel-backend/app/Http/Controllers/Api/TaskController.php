@@ -38,7 +38,23 @@ class TaskController extends Controller
             }
             
             if (!empty($managedDepts)) {
-                $query->whereIn('department', $managedDepts);
+                // Convert department IDs to names for filtering
+                $managedDeptNames = [];
+                foreach ($managedDepts as $deptId) {
+                    if (is_numeric($deptId)) {
+                        $dept = Department::find((int)$deptId);
+                        if ($dept) {
+                            $managedDeptNames[] = $dept->name;
+                        }
+                    } else {
+                        // Already a name
+                        $managedDeptNames[] = $deptId;
+                    }
+                }
+                
+                if (!empty($managedDeptNames)) {
+                    $query->whereIn('department', $managedDeptNames);
+                }
             }
         }
 

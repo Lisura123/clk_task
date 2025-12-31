@@ -1,3 +1,4 @@
+// Cache Buster: v2025.12.31.2
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -15,6 +16,7 @@ import CreateEmployee from './pages/CreateEmployee';
 import PendingRegistrations from './pages/PendingRegistrations';
 import Departments from './pages/Departments';
 import Groups from './pages/Groups';
+import Schedule from './pages/Schedule';
 import Settings from './pages/Settings';
 import Search from './pages/Search';
 import Notifications from './pages/Notifications';
@@ -129,6 +131,16 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
                 <Groups />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Schedule - Department admins can manage schedules */}
+          <Route
+            path="dashboard/schedule"
+            element={
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+                <Schedule />
               </ProtectedRoute>
             }
           />

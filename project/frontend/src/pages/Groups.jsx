@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, Users as UsersIcon, UserPlus, X } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Users as UsersIcon, UserPlus, X, MessageCircle } from 'lucide-react';
 import { groupAPI, userAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+import GroupChat from '../components/GroupChat';
 
 export default function Groups() {
   const { user } = useAuthStore();
@@ -14,6 +15,7 @@ export default function Groups() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState(null);
+  const [chatGroup, setChatGroup] = useState(null);
   const [memberSearchTerm, setMemberSearchTerm] = useState('');
   const [formData, setFormData] = useState({
     name: '',
@@ -304,6 +306,14 @@ export default function Groups() {
                 </div>
 
                 <div className="flex gap-2 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setChatGroup(group)}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                    title="Group Chat"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Chat
+                  </button>
                   <button
                     onClick={() => handleEdit(group)}
                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
@@ -695,6 +705,11 @@ export default function Groups() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Group Chat Modal */}
+      {chatGroup && (
+        <GroupChat group={chatGroup} onClose={() => setChatGroup(null)} />
       )}
     </div>
   );

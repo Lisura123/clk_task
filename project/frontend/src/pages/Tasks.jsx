@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Filter, Edit2, Trash2, Eye, X, Calendar, ClipboardList, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Plus, Search, Filter, Edit2, Trash2, Eye, X, Calendar, ClipboardList, CheckCircle, Clock, AlertCircle, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { taskAPI, departmentAPI, userAPI } from '../services/api';
 import api from '../services/api';
 import useAuthStore from '../store/authStore';
+import DailyWorkLog from '../components/DailyWorkLog';
 
 export default function Tasks() {
   const { user } = useAuthStore();
@@ -20,13 +21,16 @@ export default function Tasks() {
   const [dateTo, setDateTo] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showWorkLogModal, setShowWorkLogModal] = useState(false);
+  const [workLogTask, setWorkLogTask] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     priority: 'medium',
     due_date: '',
-    assigned_to: ''
+    assigned_to: '',
+    department_id: ''
   });
   const [stats, setStats] = useState({
     total: 0,
@@ -43,6 +47,18 @@ export default function Tasks() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      
+      // Determine which department ID to use for fetching employees
+      let deptIdForEmployees = user?.department_id;
+      if (user?.role === 'dept_admin') {
+        const managedIds = (user.managed_department_ids || [])
+          .map(id => Number(id))
+          .filter(id => Number.isFinite(id) && id > 0);
+        if (managedIds.length > 0) {
+          deptIdForEmployees = managedIds[0];
+        }
+      }
+      
       const [tasksRes, deptsRes, employeesRes] = await Promise.all([
         user.role === 'super_admin' 
           ? taskAPI.getAllTasks()
@@ -50,7 +66,7 @@ export default function Tasks() {
           ? taskAPI.getAllTasks() // Dept admin sees all their managed department tasks
           : taskAPI.getMyTasks(), // Employees see only their assigned tasks
         departmentAPI.getAllDepartments(),
-        user?.department_id ? departmentAPI.getEmployees(user.department_id, { status: 'active', per_page: 100 }) : Promise.resolve({ data: { data: [] } })
+        deptIdForEmployees ? departmentAPI.getEmployees(deptIdForEmployees, { status: 'active', per_page: 100 }) : Promise.resolve({ data: { data: [] } })
       ]);
       
       const allTasks = tasksRes.data.tasks || [];
@@ -65,6 +81,7 @@ export default function Tasks() {
         usersList.push({
           id: user.id,
           username: user.username,
+          name: user.name,
           department_id: user.department_id,
           status: 'active'
         });
@@ -244,17 +261,28 @@ export default function Tasks() {
           <button
             onClick={() => {
               // Set default department for dept admin
-              if (user.role === 'dept_admin' && user.managed_department_ids && user.managed_department_ids.length > 0) {
-                const defaultDept = departments.find(d => d.name === user.managed_department_ids[0]);
-                setFormData({
-                  title: '',
-                  description: '',
-                  priority: 'medium',
-                  due_date: '',
-                  assigned_to: '',
-                  department_id: defaultDept?.id || ''
-                });
+              let defaultDeptId = '';
+              if (user.role === 'dept_admin') {
+                // Try managed_department_ids first (as numbers), then fall back to user.department_id
+                const managedIds = (user.managed_department_ids || [])
+                  .map(id => Number(id))
+                  .filter(id => Number.isFinite(id) && id > 0);
+                
+                if (managedIds.length > 0) {
+                  defaultDeptId = managedIds[0];
+                } else if (user.department_id) {
+                  defaultDeptId = Number(user.department_id);
+                }
               }
+              
+              setFormData({
+                title: '',
+                description: '',
+                priority: 'medium',
+                due_date: '',
+                assigned_to: '',
+                department_id: defaultDeptId
+              });
               setShowCreateModal(true);
             }}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
@@ -498,20 +526,35 @@ export default function Tasks() {
                           <button 
                             onClick={() => navigate(`/dashboard/tasks/${task.id}`)}
                             className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                            title="View Task"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+                          {(task.assigned_to_id === user?.id || task.created_by_id === user?.id || user.role === 'super_admin' || user.role === 'dept_admin') && (
+                            <button 
+                              onClick={() => {
+                                setWorkLogTask(task);
+                                setShowWorkLogModal(true);
+                              }}
+                              className="p-1 text-green-600 hover:bg-green-50 rounded"
+                              title="Work Logs"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          )}
                           {(user.role === 'super_admin' || user.role === 'dept_admin') && (
                             <>
                               <button 
                                 onClick={() => handleEdit(task)}
                                 className="p-1 text-gray-600 hover:bg-gray-100 rounded"
+                                title="Edit Task"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button 
                                 onClick={() => handleDelete(task.id)}
                                 className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                title="Delete Task"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -603,10 +646,25 @@ export default function Tasks() {
                   disabled={user.role === 'dept_admin'}
                   required
                 >
-                  <option value="">Select Department</option>
-                  {departments.map(dept => (
-                    <option key={dept.id} value={dept.id}>{dept.name}</option>
-                  ))}
+                  {user.role !== 'dept_admin' && <option value="">Select Department</option>}
+                  {departments
+                    .filter(dept => {
+                      if (user.role === 'super_admin') return true;
+                      if (user.role === 'dept_admin') {
+                        const managedIds = (user.managed_department_ids || [])
+                          .map(id => Number(id))
+                          .filter(id => Number.isFinite(id) && id > 0);
+                        if (managedIds.length > 0) {
+                          return managedIds.includes(Number(dept.id));
+                        }
+                        return Number(dept.id) === Number(user.department_id);
+                      }
+                      return false;
+                    })
+                    .map(dept => (
+                      <option key={dept.id} value={dept.id}>{dept.name}</option>
+                    ))
+                  }
                 </select>
                 {user.role === 'dept_admin' && (
                   <p className="text-xs text-gray-500 mt-1">Department is pre-selected based on your role</p>
@@ -621,8 +679,13 @@ export default function Tasks() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
                   <option value="">Unassigned</option>
-                  {users.filter(u => u.status === 'active' && parseInt(u.department_id) === parseInt(user.department_id)).map(u => (
-                    <option key={u.id} value={u.id}>{u.username}</option>
+                  {users.filter(u => {
+                    if (u.status !== 'active') return false;
+                    // Filter by selected department or user's department
+                    const targetDeptId = formData.department_id || user.department_id;
+                    return parseInt(u.department_id) === parseInt(targetDeptId);
+                  }).map(u => (
+                    <option key={u.id} value={u.id}>{u.username || u.name}</option>
                   ))}
                 </select>
               </div>
@@ -773,6 +836,18 @@ export default function Tasks() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Work Log Modal */}
+      {showWorkLogModal && workLogTask && (
+        <DailyWorkLog
+          task={workLogTask}
+          onClose={() => {
+            setShowWorkLogModal(false);
+            setWorkLogTask(null);
+          }}
+          onUpdate={fetchData}
+        />
       )}
     </div>
   );

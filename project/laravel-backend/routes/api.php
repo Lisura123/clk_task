@@ -11,6 +11,10 @@ use App\Http\Controllers\Api\CommentController;
 use App\Http\Controllers\Api\TimeEntryController;
 use App\Http\Controllers\Api\TaskLinkController;
 use App\Http\Controllers\Api\GroupController;
+use App\Http\Controllers\Api\GroupPlanController;
+use App\Http\Controllers\Api\GroupMessageController;
+use App\Http\Controllers\Api\DailyWorkLogController;
+use App\Http\Controllers\Api\ScheduledPlanController;
 
 /*
 |--------------------------------------------------------------------------
@@ -95,12 +99,43 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/timer/{id}/stop', [TimeEntryController::class, 'stopTimer']);
     Route::get('/timer/running', [TimeEntryController::class, 'getRunningTimer']);
 
+    // Daily Work Log routes
+    Route::get('/my-work-logs', [DailyWorkLogController::class, 'myLogs']); // Get current user's logs
+    Route::get('/work-logs/summary', [DailyWorkLogController::class, 'summary']); // Admin summary
+    Route::get('/tasks/{task}/work-logs', [DailyWorkLogController::class, 'index']); // Get logs for task
+    Route::post('/tasks/{task}/work-logs', [DailyWorkLogController::class, 'store']); // Create log
+    Route::put('/tasks/{task}/work-logs/{log}', [DailyWorkLogController::class, 'update']); // Update log
+    Route::delete('/tasks/{task}/work-logs/{log}', [DailyWorkLogController::class, 'destroy']); // Delete log
+
     // Group routes
     Route::get('/groups', [GroupController::class, 'index']);
     Route::post('/groups', [GroupController::class, 'store']); // Admin and dept admin
     Route::get('/groups/{id}', [GroupController::class, 'show']);
     Route::put('/groups/{id}', [GroupController::class, 'update']); // Admin and dept admin
     Route::delete('/groups/{id}', [GroupController::class, 'destroy']); // Admin and dept admin
+
+    // Group Plan routes
+    Route::get('/my-plans', [GroupPlanController::class, 'myPlans']); // Get all plans accessible by user
+    Route::get('/groups/{group}/plans', [GroupPlanController::class, 'index']); // Get plans for a group
+    Route::post('/groups/{group}/plans', [GroupPlanController::class, 'store']); // Create plan
+    Route::get('/groups/{group}/plans/{plan}', [GroupPlanController::class, 'show']); // Get specific plan
+    Route::put('/groups/{group}/plans/{plan}', [GroupPlanController::class, 'update']); // Update plan
+    Route::delete('/groups/{group}/plans/{plan}', [GroupPlanController::class, 'destroy']); // Delete plan
+
+    // Group Message routes (Chat)
+    Route::get('/groups/{group}/messages', [GroupMessageController::class, 'index']); // Get messages
+    Route::post('/groups/{group}/messages', [GroupMessageController::class, 'store']); // Send message
+    Route::put('/groups/{group}/messages/{message}', [GroupMessageController::class, 'update']); // Edit message
+    Route::delete('/groups/{group}/messages/{message}', [GroupMessageController::class, 'destroy']); // Delete message
+
+    // Scheduled Plan routes (Department Admin Scheduling)
+    Route::get('/scheduled-plans', [ScheduledPlanController::class, 'index']); // Get all plans
+    Route::get('/scheduled-plans/calendar', [ScheduledPlanController::class, 'calendar']); // Calendar view
+    Route::get('/scheduled-plans/upcoming', [ScheduledPlanController::class, 'upcoming']); // Upcoming plans
+    Route::post('/scheduled-plans', [ScheduledPlanController::class, 'store']); // Create plan
+    Route::get('/scheduled-plans/{id}', [ScheduledPlanController::class, 'show']); // Get specific plan
+    Route::put('/scheduled-plans/{id}', [ScheduledPlanController::class, 'update']); // Update plan
+    Route::delete('/scheduled-plans/{id}', [ScheduledPlanController::class, 'destroy']); // Delete plan
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);

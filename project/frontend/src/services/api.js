@@ -156,4 +156,42 @@ export const groupAPI = {
   delete: (id) => api.delete(`/groups/${id}`),
 };
 
+export const groupPlanAPI = {
+  getMyPlans: () => api.get('/my-plans'),
+  getByGroup: (groupId) => api.get(`/groups/${groupId}/plans`),
+  getById: (groupId, planId) => api.get(`/groups/${groupId}/plans/${planId}`),
+  create: (groupId, data) => api.post(`/groups/${groupId}/plans`, data),
+  update: (groupId, planId, data) => api.put(`/groups/${groupId}/plans/${planId}`, data),
+  delete: (groupId, planId) => api.delete(`/groups/${groupId}/plans/${planId}`),
+};
+
+export const groupMessageAPI = {
+  getMessages: (groupId, params) => api.get(`/groups/${groupId}/messages`, { params }),
+  sendMessage: (groupId, data) => api.post(`/groups/${groupId}/messages`, data),
+  updateMessage: (groupId, messageId, data) => api.put(`/groups/${groupId}/messages/${messageId}`, data),
+  deleteMessage: (groupId, messageId) => api.delete(`/groups/${groupId}/messages/${messageId}`),
+};
+
+export const workLogAPI = {
+  getMyLogs: (params) => api.get('/my-work-logs', { params }),
+  getSummary: (params) => api.get('/work-logs/summary', { params }),
+  getByTask: (taskId, params) => api.get(`/tasks/${taskId}/work-logs`, { params }),
+  create: (taskId, data) => api.post(`/tasks/${taskId}/work-logs`, data),
+  update: (taskId, logId, data) => api.put(`/tasks/${taskId}/work-logs/${logId}`, data),
+  delete: (taskId, logId) => api.delete(`/tasks/${taskId}/work-logs/${logId}`),
+};
+
+// Scheduled Plans API (Department Admin Scheduling)
+export const scheduledPlanAPI = {
+  getAll: (params) => api.get('/scheduled-plans', { params }),
+  getCalendar: (year, month, departmentId) => api.get('/scheduled-plans/calendar', { 
+    params: { year, month, department_id: departmentId } 
+  }),
+  getUpcoming: (limit) => api.get('/scheduled-plans/upcoming', { params: { limit } }),
+  getById: (id) => api.get(`/scheduled-plans/${id}`),
+  create: (data) => api.post('/scheduled-plans', data),
+  update: (id, data) => api.put(`/scheduled-plans/${id}`, data),
+  delete: (id) => api.delete(`/scheduled-plans/${id}`),
+};
+
 export default api;

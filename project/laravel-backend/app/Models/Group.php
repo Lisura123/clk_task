@@ -44,4 +44,14 @@ class Group extends Model
             ->wherePivot('role', 'leader')
             ->withTimestamps();
     }
+
+    public function plans()
+    {
+        return $this->hasMany(GroupPlan::class);
+    }
+
+    public function messages()
+    {
+        return $this->hasMany(GroupMessage::class);
+    }
 }

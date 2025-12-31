@@ -20,7 +20,8 @@ import {
   Calendar,
   Eye,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  FileText
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import api from '../services/api';
@@ -155,6 +156,7 @@ export default function DashboardLayout() {
     { name: 'Pending Registrations', href: '/dashboard/pending-registrations', icon: UserCheck, roles: ['super_admin'] },
     { name: 'Departments', href: '/dashboard/departments', icon: Building2, roles: ['super_admin'] },
     { name: 'Groups', href: '/dashboard/groups', icon: Users, roles: ['super_admin', 'dept_admin'] },
+    { name: 'Schedule', href: '/dashboard/schedule', icon: Calendar, roles: ['super_admin', 'dept_admin'] },
     { name: 'Search', href: '/dashboard/search', icon: Search, roles: ['super_admin', 'dept_admin', 'employee'] },
   ];
 

@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Edit2, Save, X, Trash2, Calendar, Clock, AlertCircle, User, Users, Building2,
-  FileText, MessageSquare, Send, Download, Paperclip, Upload, Reply, Percent, Link, ExternalLink, Plus
+  FileText, MessageSquare, Send, Download, Paperclip, Upload, Reply, Percent, Link, ExternalLink, Plus,
+  ClipboardList
 } from 'lucide-react';
 import { format } from 'date-fns';
 import useAuthStore from '../store/authStore';
-import api from '../services/api';
+import api, { workLogAPI } from '../services/api';
 import CommentThread from '../components/CommentThread';
 import CommentInput from '../components/CommentInput';
+import DailyWorkLog from '../components/DailyWorkLog';
 
 const TaskDetails = () => {
   const { id } = useParams();
@@ -28,6 +30,8 @@ const TaskDetails = () => {
   const [participants, setParticipants] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [links, setLinks] = useState([]);
+  const [workLogs, setWorkLogs] = useState([]);
+  const [showWorkLogModal, setShowWorkLogModal] = useState(false);
   
   // UI State
   const [activeTab, setActiveTab] = useState('details');
@@ -46,7 +50,7 @@ const TaskDetails = () => {
     try {
       setLoading(true);
       const [
-        taskRes, commentsRes, attachmentsRes, deptsRes, usersRes, participantsRes, linksRes
+        taskRes, commentsRes, attachmentsRes, deptsRes, usersRes, participantsRes, linksRes, workLogsRes
       ] = await Promise.all([
         api.get(`/tasks/${id}`),
         api.get(`/tasks/${id}/comments`).catch(() => ({ data: { data: { comments: [] } } })),
@@ -54,7 +58,8 @@ const TaskDetails = () => {
         api.get('/departments'),
         api.get('/users/basic').catch(() => ({ data: { users: [] } })),
         api.get(`/tasks/${id}/participants`).catch(() => ({ data: { participants: [] } })),
-        api.get(`/tasks/${id}/links`).catch(() => ({ data: { data: { links: [] } } }))
+        api.get(`/tasks/${id}/links`).catch(() => ({ data: { data: { links: [] } } })),
+        workLogAPI.getByTask(id).catch(() => ({ data: [] }))
       ]);
 
       const taskData = taskRes.data.data || taskRes.data.task;
@@ -74,6 +79,7 @@ const TaskDetails = () => {
       setComments(commentsRes.data.data?.comments || commentsRes.data.comments || []);
       setParticipants(participantsRes.data.participants || []);
       setAttachments(attachmentsRes.data.data?.attachments || []);
+      setWorkLogs(workLogsRes.data || []);
       setLinks(linksRes.data.data?.links || linksRes.data.links || []);
       
       // Basic data
@@ -623,6 +629,17 @@ const TaskDetails = () => {
           >
             <FileText className="w-4 h-4 inline mr-1" />
             Details
+          </button>
+          <button
+            onClick={() => setActiveTab('worklogs')}
+            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+              activeTab === 'worklogs'
+                ? 'border-red-600 text-red-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <ClipboardList className="w-4 h-4 inline mr-1" />
+            Work Logs ({workLogs.length})
           </button>
           <button
             onClick={() => setActiveTab('comments')}
@@ -1329,6 +1346,115 @@ const TaskDetails = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* Work Logs Tab */}
+      {activeTab === 'worklogs' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold text-gray-800">Daily Work Logs</h3>
+            {(task?.assigned_to_id === user?.id || task?.created_by_id === user?.id) && (
+              <button
+                onClick={() => setShowWorkLogModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Log Work
+              </button>
+            )}
+          </div>
+
+          {/* Work Logs Stats */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-blue-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-blue-600">{workLogs.length}</div>
+              <div className="text-xs text-blue-700">Total Logs</div>
+            </div>
+            <div className="bg-green-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-green-600">
+                {workLogs.reduce((sum, log) => sum + (parseFloat(log.hours_worked) || 0), 0).toFixed(1)}h
+              </div>
+              <div className="text-xs text-green-700">Total Hours</div>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-purple-600">{task?.progress || 0}%</div>
+              <div className="text-xs text-purple-700">Progress</div>
+            </div>
+          </div>
+
+          {/* Work Logs List */}
+          {workLogs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+              <ClipboardList className="w-12 h-12 mb-2" />
+              <p>No work logs yet</p>
+              {(task?.assigned_to_id === user?.id) && (
+                <p className="text-sm">Click "Log Work" to add your first entry</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {workLogs.map(log => (
+                <div key={log.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Calendar className="w-4 h-4" />
+                        <span>{format(new Date(log.work_date), 'MMM dd, yyyy')}</span>
+                      </div>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        log.status === 'completed' ? 'bg-green-100 text-green-800' :
+                        log.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                        log.status === 'blocked' ? 'bg-red-100 text-red-800' :
+                        'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {log.status?.replace('_', ' ')}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 whitespace-pre-wrap mb-3">{log.description}</p>
+                  <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                    {log.hours_worked && (
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        <span>{log.hours_worked}h worked</span>
+                      </div>
+                    )}
+                    {log.progress_percentage !== null && (
+                      <div className="flex items-center gap-1">
+                        <Percent className="w-4 h-4" />
+                        <span>{log.progress_percentage}% progress</span>
+                      </div>
+                    )}
+                  </div>
+                  {log.blockers && (
+                    <div className="mt-3 p-2 bg-red-50 rounded-lg">
+                      <div className="flex items-center gap-2 text-red-700 text-sm font-medium mb-1">
+                        <AlertCircle className="w-4 h-4" />
+                        Blockers
+                      </div>
+                      <p className="text-red-600 text-sm">{log.blockers}</p>
+                    </div>
+                  )}
+                  <div className="mt-3 text-xs text-gray-400">
+                    Logged by {log.user?.name || 'Unknown'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Work Log Modal */}
+      {showWorkLogModal && task && (
+        <DailyWorkLog
+          task={task}
+          onClose={() => setShowWorkLogModal(false)}
+          onUpdate={() => {
+            setShowWorkLogModal(false);
+            fetchTaskDetails();
+          }}
+        />
       )}
     </div>
   );
