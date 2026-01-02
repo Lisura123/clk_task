@@ -36,6 +36,24 @@ class Task extends Model
         'completed_at' => 'datetime',
     ];
 
+    protected $appends = ['assigned_to_name', 'created_by_name'];
+
+    /**
+     * Get the assigned user's name
+     */
+    public function getAssignedToNameAttribute()
+    {
+        return $this->assignedTo?->username ?? $this->assignedTo?->name;
+    }
+
+    /**
+     * Get the creator's name
+     */
+    public function getCreatedByNameAttribute()
+    {
+        return $this->createdBy?->username ?? $this->createdBy?->name;
+    }
+
     /**
      * Get the user assigned to this task
      */

@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ScheduledPlan;
 use App\Models\Department;
-use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -17,22 +16,13 @@ class ScheduledPlanController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
-        $query = ScheduledPlan::with(['creator', 'assignee', 'department']);
+        $query = ScheduledPlan::with(['creator', 'department']);
 
         // Filter by user's access
         if ($user->role === 'super_admin') {
             // Super admin sees all
         } elseif ($user->role === 'dept_admin') {
-            // Dept admin sees their managed departments
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {
             // Regular employees see their department's plans
@@ -41,17 +31,14 @@ class ScheduledPlanController extends Controller
 
         // Filter by date range
         if ($request->has('start_date') && $request->has('end_date')) {
-            $query->whereBetween('scheduled_date', [$request->start_date, $request->end_date]);
-        }
-
-        // Filter by status
-        if ($request->has('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by type
-        if ($request->has('type') && $request->type !== 'all') {
-            $query->where('type', $request->type);
+            $query->where(function($q) use ($request) {
+                $q->whereBetween('start_date', [$request->start_date, $request->end_date])
+                  ->orWhereBetween('end_date', [$request->start_date, $request->end_date])
+                  ->orWhere(function($inner) use ($request) {
+                      $inner->where('start_date', '<=', $request->start_date)
+                            ->where('end_date', '>=', $request->end_date);
+                  });
+            });
         }
 
         // Filter by department
@@ -59,35 +46,25 @@ class ScheduledPlanController extends Controller
             $query->where('department_id', $request->department_id);
         }
 
-        $plans = $query->orderBy('scheduled_date')
-            ->orderBy('start_time')
-            ->get()
-            ->map(function ($plan) {
-                return [
-                    'id' => $plan->id,
-                    'title' => $plan->title,
-                    'description' => $plan->description,
-                    'department_id' => $plan->department_id,
-                    'department_name' => $plan->department->name ?? 'Unknown',
-                    'created_by' => $plan->created_by,
-                    'creator_name' => $plan->creator->name ?? 'Unknown',
-                    'assigned_to' => $plan->assigned_to,
-                    'assignee_name' => $plan->assignee->name ?? null,
-                    'scheduled_date' => $plan->scheduled_date->format('Y-m-d'),
-                    'start_time' => $plan->start_time,
-                    'end_time' => $plan->end_time,
-                    'type' => $plan->type,
-                    'status' => $plan->status,
-                    'priority' => $plan->priority,
-                    'is_recurring' => $plan->is_recurring,
-                    'recurrence_pattern' => $plan->recurrence_pattern,
-                    'recurrence_end_date' => $plan->recurrence_end_date?->format('Y-m-d'),
-                    'notes' => $plan->notes,
-                    'location' => $plan->location,
-                    'created_at' => $plan->created_at,
-                    'updated_at' => $plan->updated_at,
-                ];
-            });
+        $plans = $query->orderBy('start_date')->get()->map(function ($plan) {
+            return [
+                'id' => $plan->id,
+                'title' => $plan->title,
+                'description' => $plan->description,
+                'department_id' => $plan->department_id,
+                'department_name' => $plan->department->name ?? 'Unknown',
+                'created_by' => $plan->created_by,
+                'creator_name' => $plan->creator->name ?? 'Unknown',
+                'start_date' => $plan->start_date->format('Y-m-d'),
+                'end_date' => $plan->end_date?->format('Y-m-d'),
+                'is_recurring' => $plan->is_recurring,
+                'recurrence_pattern' => $plan->recurrence_pattern,
+                'recurrence_end_date' => $plan->recurrence_end_date?->format('Y-m-d'),
+                'notes' => $plan->notes,
+                'created_at' => $plan->created_at,
+                'updated_at' => $plan->updated_at,
+            ];
+        });
 
         return response()->json($plans);
     }
@@ -108,59 +85,29 @@ class ScheduledPlanController extends Controller
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
             'department_id' => 'required|exists:departments,id',
-            'assigned_to' => 'nullable|exists:users,id',
-            'scheduled_date' => 'required|date',
-            'start_time' => 'nullable|date_format:H:i',
-            'end_time' => 'nullable|date_format:H:i|after:start_time',
-            'type' => 'required|in:meeting,task,event,deadline,reminder,other',
-            'status' => 'nullable|in:pending,in_progress,completed,cancelled',
-            'priority' => 'nullable|in:low,medium,high,urgent',
+            'start_date' => 'required|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
             'is_recurring' => 'nullable|boolean',
             'recurrence_pattern' => 'nullable|in:daily,weekly,monthly,yearly',
-            'recurrence_end_date' => 'nullable|date|after:scheduled_date',
+            'recurrence_end_date' => 'nullable|date|after:start_date',
             'notes' => 'nullable|string',
-            'location' => 'nullable|string|max:255',
         ]);
 
         // Verify dept admin can create for this department
         if ($user->role === 'dept_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array((int)$validated['department_id'], $managedDeptIds)) {
                 return response()->json(['message' => 'You can only create plans for your managed departments'], 403);
             }
         }
 
         $validated['created_by'] = $user->id;
-        $validated['status'] = $validated['status'] ?? 'pending';
-        $validated['priority'] = $validated['priority'] ?? 'medium';
 
         $plan = ScheduledPlan::create($validated);
 
-        // Notify assigned user if different from creator
-        if ($plan->assigned_to && $plan->assigned_to !== $user->id) {
-            Notification::create([
-                'user_id' => $plan->assigned_to,
-                'type' => 'plan_assigned',
-                'title' => 'New Plan Assigned',
-                'message' => "{$user->name} assigned you a scheduled plan: {$plan->title}",
-                'data' => json_encode([
-                    'plan_id' => $plan->id,
-                    'scheduled_date' => $plan->scheduled_date->format('Y-m-d'),
-                ]),
-            ]);
-        }
-
         return response()->json([
             'message' => 'Scheduled plan created successfully',
-            'plan' => $plan->load(['creator', 'assignee', 'department']),
+            'plan' => $plan->load(['creator', 'department']),
         ], 201);
     }
 
@@ -170,19 +117,11 @@ class ScheduledPlanController extends Controller
     public function show($id)
     {
         $user = Auth::user();
-        $plan = ScheduledPlan::with(['creator', 'assignee', 'department'])->findOrFail($id);
+        $plan = ScheduledPlan::with(['creator', 'department'])->findOrFail($id);
 
         // Check access
         if ($user->role !== 'super_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
@@ -206,15 +145,7 @@ class ScheduledPlanController extends Controller
 
         // Check department access
         if ($user->role === 'dept_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
@@ -223,40 +154,19 @@ class ScheduledPlanController extends Controller
         $validated = $request->validate([
             'title' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'assigned_to' => 'nullable|exists:users,id',
-            'scheduled_date' => 'sometimes|required|date',
-            'start_time' => 'nullable|date_format:H:i',
-            'end_time' => 'nullable|date_format:H:i',
-            'type' => 'sometimes|required|in:meeting,task,event,deadline,reminder,other',
-            'status' => 'nullable|in:pending,in_progress,completed,cancelled',
-            'priority' => 'nullable|in:low,medium,high,urgent',
+            'start_date' => 'sometimes|required|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
             'is_recurring' => 'nullable|boolean',
             'recurrence_pattern' => 'nullable|in:daily,weekly,monthly,yearly',
             'recurrence_end_date' => 'nullable|date',
             'notes' => 'nullable|string',
-            'location' => 'nullable|string|max:255',
         ]);
 
-        $oldAssignee = $plan->assigned_to;
         $plan->update($validated);
-
-        // Notify if assignee changed
-        if (isset($validated['assigned_to']) && $validated['assigned_to'] !== $oldAssignee && $validated['assigned_to'] !== $user->id) {
-            Notification::create([
-                'user_id' => $validated['assigned_to'],
-                'type' => 'plan_assigned',
-                'title' => 'Plan Assigned to You',
-                'message' => "{$user->name} assigned you a scheduled plan: {$plan->title}",
-                'data' => json_encode([
-                    'plan_id' => $plan->id,
-                    'scheduled_date' => $plan->scheduled_date->format('Y-m-d'),
-                ]),
-            ]);
-        }
 
         return response()->json([
             'message' => 'Scheduled plan updated successfully',
-            'plan' => $plan->load(['creator', 'assignee', 'department']),
+            'plan' => $plan->load(['creator', 'department']),
         ]);
     }
 
@@ -275,15 +185,7 @@ class ScheduledPlanController extends Controller
 
         // Check department access
         if ($user->role === 'dept_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
@@ -301,27 +203,34 @@ class ScheduledPlanController extends Controller
     {
         $user = Auth::user();
         $year = $request->get('year', date('Y'));
-        $month = $request->get('month', date('m'));
+        $month = str_pad($request->get('month', date('m')), 2, '0', STR_PAD_LEFT);
 
         $startDate = "{$year}-{$month}-01";
         $endDate = date('Y-m-t', strtotime($startDate));
 
-        $query = ScheduledPlan::with(['creator', 'assignee', 'department'])
-            ->whereBetween('scheduled_date', [$startDate, $endDate]);
+        $query = ScheduledPlan::with(['creator', 'department'])
+            ->where(function($q) use ($startDate, $endDate) {
+                // Plan starts within the month
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                  // OR plan ends within the month
+                  ->orWhereBetween('end_date', [$startDate, $endDate])
+                  // OR plan spans the entire month
+                  ->orWhere(function($inner) use ($startDate, $endDate) {
+                      $inner->where('start_date', '<=', $startDate)
+                            ->where('end_date', '>=', $endDate);
+                  })
+                  // Include plans without end_date (single day plans)
+                  ->orWhere(function($inner) use ($startDate, $endDate) {
+                      $inner->whereNull('end_date')
+                            ->whereBetween('start_date', [$startDate, $endDate]);
+                  });
+            });
 
         // Filter by user's access
         if ($user->role === 'super_admin') {
             // Super admin sees all
         } elseif ($user->role === 'dept_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {
             $query->where('department_id', $user->department_id);
@@ -332,27 +241,44 @@ class ScheduledPlanController extends Controller
             $query->where('department_id', $request->department_id);
         }
 
-        $plans = $query->orderBy('scheduled_date')
-            ->orderBy('start_time')
-            ->get();
+        $plans = $query->orderBy('start_date')->get();
 
         // Group plans by date for calendar view
         $calendarData = [];
         foreach ($plans as $plan) {
-            $date = $plan->scheduled_date->format('Y-m-d');
-            if (!isset($calendarData[$date])) {
-                $calendarData[$date] = [];
+            $planStart = $plan->start_date;
+            $planEnd = $plan->end_date ?? $plan->start_date;
+            
+            // Add plan to each day it spans
+            $currentDate = clone $planStart;
+            while ($currentDate <= $planEnd) {
+                $dateKey = $currentDate->format('Y-m-d');
+                
+                // Only include dates within the requested month
+                if ($dateKey >= $startDate && $dateKey <= $endDate) {
+                    if (!isset($calendarData[$dateKey])) {
+                        $calendarData[$dateKey] = [];
+                    }
+                    
+                    // Avoid duplicates
+                    $exists = collect($calendarData[$dateKey])->contains('id', $plan->id);
+                    if (!$exists) {
+                        $calendarData[$dateKey][] = [
+                            'id' => $plan->id,
+                            'title' => $plan->title,
+                            'description' => $plan->description,
+                            'department_name' => $plan->department->name ?? 'Unknown',
+                            'start_date' => $plan->start_date->format('Y-m-d'),
+                            'end_date' => $plan->end_date?->format('Y-m-d'),
+                            'is_recurring' => $plan->is_recurring,
+                            'recurrence_pattern' => $plan->recurrence_pattern,
+                            'creator_name' => $plan->creator->name ?? 'Unknown',
+                        ];
+                    }
+                }
+                
+                $currentDate->addDay();
             }
-            $calendarData[$date][] = [
-                'id' => $plan->id,
-                'title' => $plan->title,
-                'type' => $plan->type,
-                'status' => $plan->status,
-                'priority' => $plan->priority,
-                'start_time' => $plan->start_time,
-                'end_time' => $plan->end_time,
-                'assignee_name' => $plan->assignee->name ?? null,
-            ];
         }
 
         return response()->json([
@@ -370,36 +296,43 @@ class ScheduledPlanController extends Controller
         $user = Auth::user();
         $limit = $request->get('limit', 5);
 
-        $query = ScheduledPlan::with(['creator', 'assignee', 'department'])
-            ->where('scheduled_date', '>=', now()->toDateString())
-            ->whereIn('status', ['pending', 'in_progress']);
+        $query = ScheduledPlan::with(['creator', 'department'])
+            ->where(function($q) {
+                $q->where('start_date', '>=', now()->toDateString())
+                  ->orWhere(function($inner) {
+                      $inner->where('end_date', '>=', now()->toDateString());
+                  });
+            });
 
         // Filter by user's access
         if ($user->role === 'super_admin') {
             // Super admin sees all
         } elseif ($user->role === 'dept_admin') {
-            $managedDeptIds = collect($user->managed_department_ids ?? [])
-                ->map(fn($id) => is_numeric($id) ? (int)$id : null)
-                ->filter()
-                ->toArray();
-            
-            if (empty($managedDeptIds) && $user->department_id) {
-                $managedDeptIds = [$user->department_id];
-            }
-            
+            $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {
-            $query->where(function ($q) use ($user) {
-                $q->where('department_id', $user->department_id)
-                  ->orWhere('assigned_to', $user->id);
-            });
+            $query->where('department_id', $user->department_id);
         }
 
-        $plans = $query->orderBy('scheduled_date')
-            ->orderBy('start_time')
-            ->limit($limit)
-            ->get();
+        $plans = $query->orderBy('start_date')->limit($limit)->get();
 
         return response()->json($plans);
+    }
+
+    /**
+     * Get managed department IDs for a user
+     */
+    private function getManagedDepartmentIds($user): array
+    {
+        $managedDeptIds = collect($user->managed_department_ids ?? [])
+            ->map(fn($id) => is_numeric($id) ? (int)$id : null)
+            ->filter()
+            ->toArray();
+        
+        if (empty($managedDeptIds) && $user->department_id) {
+            $managedDeptIds = [$user->department_id];
+        }
+        
+        return $managedDeptIds;
     }
 }

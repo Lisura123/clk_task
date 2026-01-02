@@ -1,83 +1,228 @@
-import { useState, useEffect } from 'react';
-import { Search as SearchIcon, ClipboardList, Users, Filter, X, SlidersHorizontal, Calendar, ArrowUpDown, Building2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search as SearchIcon, ClipboardList, Users, X, Building2, AlertCircle, UserCog, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { taskAPI, userAPI } from '../services/api';
+import { taskAPI, userAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
-import api from '../services/api';
 
 export default function Search() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [searchType, setSearchType] = useState('all');
-  const [results, setResults] = useState({ tasks: [], users: [] });
+  const [results, setResults] = useState({ tasks: [], users: [], departments: [], hods: [] });
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
   const [departments, setDepartments] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [allTasks, setAllTasks] = useState([]);
   
-  // Advanced filters
-  const [filters, setFilters] = useState({
-    status: '',
-    priority: '',
-    department: '',
-    dateFrom: '',
-    dateTo: '',
-    sortBy: 'created_at',
-    sortOrder: 'desc'
-  });
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const suggestionsRef = useRef(null);
+  const inputRef = useRef(null);
+  const debounceRef = useRef(null);
 
   const isEmployee = user?.role === 'employee';
+  const isHOD = user?.role === 'dept_admin';
+  const isAdmin = user?.role === 'super_admin';
+
+  // Get managed department IDs for HOD
+  const getManagedDeptIds = () => {
+    if (!isHOD) return [];
+    return (user.managed_department_ids || [])
+      .map(id => Number(id))
+      .filter(id => Number.isFinite(id) && id > 0);
+  };
 
   useEffect(() => {
-    if (!isEmployee) {
-      fetchDepartments();
-    }
-  }, [isEmployee]);
+    fetchInitialData();
+  }, []);
 
-  const fetchDepartments = async () => {
+  // Click outside to close suggestions
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(event.target) &&
+          inputRef.current && !inputRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const fetchInitialData = async () => {
     try {
-      const response = await api.get('/departments');
-      setDepartments(response.data.departments || []);
+      const promises = [departmentAPI.getAllDepartments()];
+      
+      // Fetch users for admins and HODs
+      if (!isEmployee) {
+        promises.push(userAPI.getAllUsers({ per_page: 100 }));
+      }
+      
+      // Fetch tasks
+      if (isEmployee) {
+        promises.push(taskAPI.getMyTasks());
+      } else {
+        promises.push(taskAPI.getAllTasks());
+      }
+
+      const responses = await Promise.all(promises);
+      
+      let depts = responses[0].data || [];
+      setDepartments(depts);
+      
+      if (!isEmployee) {
+        const usersData = responses[1].data?.data || responses[1].data?.users || [];
+        // For HOD, filter users to their managed departments
+        if (isHOD) {
+          const managedIds = getManagedDeptIds();
+          const filteredUsers = usersData.filter(u => 
+            managedIds.includes(Number(u.department_id)) || Number(u.department_id) === Number(user.department_id)
+          );
+          setAllUsers(filteredUsers);
+        } else {
+          setAllUsers(usersData);
+        }
+      }
+      
+      const tasksData = responses[isEmployee ? 1 : 2].data?.tasks || [];
+      // For HOD, filter tasks to their managed departments
+      if (isHOD) {
+        const managedIds = getManagedDeptIds();
+        const managedDeptNames = depts
+          .filter(d => managedIds.includes(Number(d.id)) || Number(d.id) === Number(user.department_id))
+          .map(d => d.name);
+        const filteredTasks = tasksData.filter(t => managedDeptNames.includes(t.department));
+        setAllTasks(filteredTasks);
+      } else {
+        setAllTasks(tasksData);
+      }
     } catch (error) {
-      console.error('Error fetching departments:', error);
+      console.error('Error fetching initial data:', error);
+    }
+  };
+
+  // Generate suggestions based on search term
+  const generateSuggestions = useCallback((term) => {
+    if (!term || term.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setLoadingSuggestions(true);
+    const searchLower = term.toLowerCase();
+    const newSuggestions = [];
+
+    // Search Tasks - available to all roles
+    const matchingTasks = allTasks.filter(t =>
+      t.title?.toLowerCase().includes(searchLower) ||
+      t.description?.toLowerCase().includes(searchLower)
+    ).slice(0, 5);
+    
+    matchingTasks.forEach(task => {
+      newSuggestions.push({
+        type: 'task',
+        id: task.id,
+        title: task.title,
+        subtitle: `${task.status} • ${task.priority} priority`,
+        icon: 'task',
+        data: task
+      });
+    });
+
+    // Search Users/Employees - available to admins and HODs
+    if (!isEmployee) {
+      const matchingUsers = allUsers.filter(u =>
+        u.username?.toLowerCase().includes(searchLower) ||
+        u.name?.toLowerCase().includes(searchLower) ||
+        u.email?.toLowerCase().includes(searchLower)
+      ).slice(0, 5);
+      
+      matchingUsers.forEach(usr => {
+        const isUserHOD = usr.role === 'dept_admin';
+        newSuggestions.push({
+          type: isUserHOD ? 'hod' : 'employee',
+          id: usr.id,
+          title: usr.name || usr.username,
+          subtitle: `${usr.email} • ${usr.department || usr.department_name || 'No department'}`,
+          icon: isUserHOD ? 'hod' : 'user',
+          data: usr
+        });
+      });
+    }
+
+    // Search Departments - available to admins only
+    if (isAdmin) {
+      const matchingDepts = departments.filter(d =>
+        d.name?.toLowerCase().includes(searchLower) ||
+        d.description?.toLowerCase().includes(searchLower)
+      ).slice(0, 3);
+      
+      matchingDepts.forEach(dept => {
+        newSuggestions.push({
+          type: 'department',
+          id: dept.id,
+          title: dept.name,
+          subtitle: dept.description || 'Department',
+          icon: 'department',
+          data: dept
+        });
+      });
+    }
+
+    setSuggestions(newSuggestions);
+    setShowSuggestions(newSuggestions.length > 0);
+    setLoadingSuggestions(false);
+  }, [allTasks, allUsers, departments, isEmployee, isAdmin]);
+
+  // Debounced search for suggestions
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    
+    debounceRef.current = setTimeout(() => {
+      generateSuggestions(value);
+    }, 300);
+  };
+
+  const handleSuggestionClick = (suggestion) => {
+    setShowSuggestions(false);
+    
+    switch (suggestion.type) {
+      case 'task':
+        navigate(`/dashboard/tasks/${suggestion.id}`);
+        break;
+      case 'employee':
+      case 'hod':
+        navigate(`/dashboard/users`);
+        break;
+      case 'department':
+        navigate(`/dashboard/departments/${suggestion.id}`);
+        break;
+      default:
+        break;
     }
   };
 
   const handleSearch = async (e) => {
     e.preventDefault();
-
+    setShowSuggestions(false);
     setLoading(true);
     setSearched(true);
+
     try {
-      const promises = [];
-      
-      if (searchType === 'all' || searchType === 'tasks') {
-        // Employees only see their own tasks
-        if (isEmployee) {
-          promises.push(taskAPI.getMyTasks());
-        } else {
-          promises.push(taskAPI.getAllTasks({ search: searchTerm }));
-        }
-      } else {
-        promises.push(Promise.resolve({ data: { tasks: [] } }));
-      }
-
-      // Employees cannot search users
-      if (!isEmployee && (searchType === 'all' || searchType === 'users')) {
-        promises.push(userAPI.getAllUsers());
-      } else {
-        promises.push(Promise.resolve({ data: { users: [] } }));
-      }
-
-      const [tasksRes, usersRes] = await Promise.all(promises);
+      const searchLower = searchTerm.toLowerCase();
       
       // Filter tasks
-      let tasks = tasksRes.data.tasks || [];
-      
-      // Apply search term
+      let tasks = allTasks;
       if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
         tasks = tasks.filter(t => 
           t.title?.toLowerCase().includes(searchLower) ||
           t.description?.toLowerCase().includes(searchLower) ||
@@ -88,91 +233,49 @@ export default function Search() {
         );
       }
 
-      // Apply advanced filters
-      if (filters.status) {
-        tasks = tasks.filter(t => t.status === filters.status);
-      }
-      if (filters.priority) {
-        tasks = tasks.filter(t => t.priority === filters.priority);
-      }
-      if (filters.department) {
-        tasks = tasks.filter(t => t.department === filters.department || t.department_name === filters.department);
-      }
-      if (filters.dateFrom) {
-        tasks = tasks.filter(t => new Date(t.due_date) >= new Date(filters.dateFrom));
-      }
-      if (filters.dateTo) {
-        tasks = tasks.filter(t => new Date(t.due_date) <= new Date(filters.dateTo));
+      // Sort by created_at descending by default
+      tasks.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+      // Filter users (employees)
+      let users = [];
+      let hods = [];
+      if (!isEmployee && (searchType === 'all' || searchType === 'users' || searchType === 'hods')) {
+        const filteredUsers = allUsers.filter(u => {
+          if (!searchTerm) return true;
+          return u.username?.toLowerCase().includes(searchLower) ||
+            u.name?.toLowerCase().includes(searchLower) ||
+            u.email?.toLowerCase().includes(searchLower) ||
+            u.department?.toLowerCase().includes(searchLower) ||
+            u.department_name?.toLowerCase().includes(searchLower);
+        });
+        
+        users = filteredUsers.filter(u => u.role === 'employee');
+        if (isAdmin) {
+          hods = filteredUsers.filter(u => u.role === 'dept_admin');
+        }
       }
 
-      // Apply sorting
-      tasks.sort((a, b) => {
-        let aVal, bVal;
-        
-        switch(filters.sortBy) {
-          case 'title':
-            aVal = a.title?.toLowerCase() || '';
-            bVal = b.title?.toLowerCase() || '';
-            break;
-          case 'due_date':
-            aVal = new Date(a.due_date || 0);
-            bVal = new Date(b.due_date || 0);
-            break;
-          case 'priority':
-            const priorityOrder = { high: 3, medium: 2, low: 1 };
-            aVal = priorityOrder[a.priority] || 0;
-            bVal = priorityOrder[b.priority] || 0;
-            break;
-          case 'progress':
-            aVal = a.progress || 0;
-            bVal = b.progress || 0;
-            break;
-          default: // created_at
-            aVal = new Date(a.created_at || 0);
-            bVal = new Date(b.created_at || 0);
-        }
-        
-        if (filters.sortOrder === 'asc') {
-          return aVal > bVal ? 1 : -1;
-        } else {
-          return aVal < bVal ? 1 : -1;
-        }
+      // Filter departments (admin only)
+      let deptResults = [];
+      if (isAdmin && (searchType === 'all' || searchType === 'departments')) {
+        deptResults = departments.filter(d => {
+          if (!searchTerm) return true;
+          return d.name?.toLowerCase().includes(searchLower) ||
+            d.description?.toLowerCase().includes(searchLower);
+        });
+      }
+
+      setResults({ 
+        tasks: searchType === 'all' || searchType === 'tasks' ? tasks : [],
+        users: searchType === 'all' || searchType === 'users' ? users : [],
+        hods: searchType === 'all' || searchType === 'hods' ? hods : [],
+        departments: searchType === 'all' || searchType === 'departments' ? deptResults : []
       });
-      
-      // Filter users
-      let users = usersRes.data.users || [];
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
-        users = users.filter(u => 
-          u.username?.toLowerCase().includes(searchLower) ||
-          u.email?.toLowerCase().includes(searchLower) ||
-          u.full_name?.toLowerCase().includes(searchLower) ||
-          u.department_name?.toLowerCase().includes(searchLower)
-        );
-      }
-
-      setResults({ tasks, users });
     } catch (error) {
       console.error('Error searching:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const clearFilters = () => {
-    setFilters({
-      status: '',
-      priority: '',
-      department: '',
-      dateFrom: '',
-      dateTo: '',
-      sortBy: 'created_at',
-      sortOrder: 'desc'
-    });
-  };
-
-  const hasActiveFilters = () => {
-    return filters.status || filters.priority || filters.department || filters.dateFrom || filters.dateTo;
   };
 
   const getStatusColor = (status) => {
@@ -187,6 +290,7 @@ export default function Search() {
 
   const getPriorityColor = (priority) => {
     switch (priority) {
+      case 'urgent': return 'bg-purple-100 text-purple-800';
       case 'high': return 'bg-red-100 text-red-800';
       case 'medium': return 'bg-orange-100 text-orange-800';
       case 'low': return 'bg-green-100 text-green-800';
@@ -194,12 +298,49 @@ export default function Search() {
     }
   };
 
+  const getSuggestionIcon = (type) => {
+    switch (type) {
+      case 'task': return <ClipboardList className="w-4 h-4 text-blue-600" />;
+      case 'employee': return <Users className="w-4 h-4 text-green-600" />;
+      case 'hod': return <UserCog className="w-4 h-4 text-orange-600" />;
+      case 'department': return <Building2 className="w-4 h-4 text-purple-600" />;
+      default: return <SearchIcon className="w-4 h-4 text-gray-400" />;
+    }
+  };
+
+  const getSearchTypeOptions = () => {
+    const options = [{ value: 'all', label: 'All' }, { value: 'tasks', label: 'Tasks' }];
+    
+    if (isAdmin) {
+      options.push({ value: 'departments', label: 'Departments' });
+      options.push({ value: 'hods', label: 'HODs' });
+      options.push({ value: 'users', label: 'Employees' });
+    } else if (isHOD) {
+      options.push({ value: 'users', label: 'Employees' });
+    }
+    
+    return options;
+  };
+
+  const getTotalResults = () => {
+    return results.tasks.length + results.users.length + results.hods.length + results.departments.length;
+  };
+
   return (
     <div>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-black">{isEmployee ? 'My Tasks Search' : 'Global Search'}</h1>
-        <p className="text-gray-600 mt-1">{isEmployee ? 'Search your assigned tasks' : 'Search across tasks and users'}</p>
+        <h1 className="text-3xl font-bold text-black">
+          {isEmployee ? 'Search My Tasks' : isHOD ? 'Department Search' : 'Global Search'}
+        </h1>
+        <p className="text-gray-600 mt-1">
+          {isEmployee 
+            ? 'Search your assigned tasks' 
+            : isHOD 
+            ? 'Search tasks and employees in your departments'
+            : 'Search across departments, HODs, employees, and tasks'
+          }
+        </p>
       </div>
 
       {/* Search Form */}
@@ -207,22 +348,82 @@ export default function Search() {
         <form onSubmit={handleSearch} className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 relative">
-              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
               <input
+                ref={inputRef}
                 type="text"
-                placeholder={isEmployee ? "Search your tasks..." : "Search for tasks, users, departments..."}
+                placeholder={
+                  isEmployee 
+                    ? "Search your tasks..." 
+                    : isHOD
+                    ? "Search tasks, employees..."
+                    : "Search departments, HODs, employees, tasks..."
+                }
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={handleSearchChange}
+                onFocus={() => searchTerm.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
                 className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-lg"
               />
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
                 >
                   <X className="w-5 h-5" />
                 </button>
+              )}
+              
+              {/* Suggestions Dropdown */}
+              {showSuggestions && (
+                <div 
+                  ref={suggestionsRef}
+                  className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto"
+                >
+                  {loadingSuggestions ? (
+                    <div className="p-4 flex items-center justify-center gap-2 text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Searching...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+                        <span className="text-xs font-medium text-gray-500 uppercase">Suggestions</span>
+                      </div>
+                      {suggestions.map((suggestion, idx) => (
+                        <button
+                          key={`${suggestion.type}-${suggestion.id}-${idx}`}
+                          type="button"
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 last:border-b-0"
+                        >
+                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                            {getSuggestionIcon(suggestion.type)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 truncate">{suggestion.title}</div>
+                            <div className="text-sm text-gray-500 truncate">{suggestion.subtitle}</div>
+                          </div>
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            suggestion.type === 'task' ? 'bg-blue-100 text-blue-700' :
+                            suggestion.type === 'employee' ? 'bg-green-100 text-green-700' :
+                            suggestion.type === 'hod' ? 'bg-orange-100 text-orange-700' :
+                            'bg-purple-100 text-purple-700'
+                          }`}>
+                            {suggestion.type === 'hod' ? 'HOD' : suggestion.type.charAt(0).toUpperCase() + suggestion.type.slice(1)}
+                          </span>
+                        </button>
+                      ))}
+                      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100">
+                        <span className="text-xs text-gray-500">Press Enter to search all results</span>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex gap-2">
@@ -232,27 +433,10 @@ export default function Search() {
                   onChange={(e) => setSearchType(e.target.value)}
                   className="px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
-                  <option value="all">All</option>
-                  <option value="tasks">Tasks</option>
-                  <option value="users">Users</option>
+                  {getSearchTypeOptions().map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
-              )}
-              {(searchType === 'all' || searchType === 'tasks') && (
-                <button
-                  type="button"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={`px-4 py-3 border rounded-lg transition-colors flex items-center gap-2 ${
-                    showFilters || hasActiveFilters() 
-                      ? 'bg-red-50 border-red-300 text-red-700' 
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <SlidersHorizontal className="w-5 h-5" />
-                  Filters
-                  {hasActiveFilters() && (
-                    <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded-full">Active</span>
-                  )}
-                </button>
               )}
               <button
                 type="submit"
@@ -262,131 +446,6 @@ export default function Search() {
               </button>
             </div>
           </div>
-
-          {/* Advanced Filters */}
-          {showFilters && (searchType === 'all' || searchType === 'tasks') && (
-            <div className="pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium text-gray-900 flex items-center gap-2">
-                  <Filter className="w-4 h-4" />
-                  Advanced Filters
-                </h3>
-                {hasActiveFilters() && (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
-                  >
-                    <X className="w-4 h-4" />
-                    Clear Filters
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Status Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    value={filters.status}
-                    onChange={(e) => setFilters({...filters, status: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                  >
-                    <option value="">All Statuses</option>
-                    <option value="todo">To Do</option>
-                    <option value="in-progress">In Progress</option>
-                    <option value="on-hold">On Hold</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                </div>
-
-                {/* Priority Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                  <select
-                    value={filters.priority}
-                    onChange={(e) => setFilters({...filters, priority: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                  >
-                    <option value="">All Priorities</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                  </select>
-                </div>
-
-                {/* Department Filter */}
-                {!isEmployee && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                    <select
-                      value={filters.department}
-                      onChange={(e) => setFilters({...filters, department: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                    >
-                      <option value="">All Departments</option>
-                      {departments.map(dept => (
-                        <option key={dept.id} value={dept.name}>{dept.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Sort By */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={filters.sortBy}
-                      onChange={(e) => setFilters({...filters, sortBy: e.target.value})}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                    >
-                      <option value="created_at">Date Created</option>
-                      <option value="due_date">Due Date</option>
-                      <option value="title">Title</option>
-                      <option value="priority">Priority</option>
-                      <option value="progress">Progress</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setFilters({...filters, sortOrder: filters.sortOrder === 'asc' ? 'desc' : 'asc'})}
-                      className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                      title={filters.sortOrder === 'asc' ? 'Ascending' : 'Descending'}
-                    >
-                      <ArrowUpDown className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Date Range */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    Due Date From
-                  </label>
-                  <input
-                    type="date"
-                    value={filters.dateFrom}
-                    onChange={(e) => setFilters({...filters, dateFrom: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    Due Date To
-                  </label>
-                  <input
-                    type="date"
-                    value={filters.dateTo}
-                    onChange={(e) => setFilters({...filters, dateTo: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
         </form>
       </div>
 
@@ -402,14 +461,113 @@ export default function Search() {
         <div className="space-y-6">
           {/* Result Summary */}
           <div className="flex items-center gap-4 text-sm text-gray-600">
-            <span>Found: {results.tasks.length} tasks, {results.users.length} users</span>
+            <span>Found: {getTotalResults()} results</span>
+            {results.tasks.length > 0 && <span>• {results.tasks.length} tasks</span>}
+            {results.users.length > 0 && <span>• {results.users.length} employees</span>}
+            {results.hods.length > 0 && <span>• {results.hods.length} HODs</span>}
+            {results.departments.length > 0 && <span>• {results.departments.length} departments</span>}
           </div>
 
-          {/* Tasks Results */}
-          {(searchType === 'all' || searchType === 'tasks') && results.tasks.length > 0 && (
+          {/* Departments Results - Admin Only */}
+          {isAdmin && results.departments.length > 0 && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <div className="flex items-center gap-2 mb-4">
-                <ClipboardList className="w-5 h-5 text-red-600" />
+                <Building2 className="w-5 h-5 text-purple-600" />
+                <h2 className="text-lg font-semibold text-black">Departments ({results.departments.length})</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {results.departments.map((dept) => (
+                  <div 
+                    key={dept.id} 
+                    onClick={() => navigate(`/dashboard/departments/${dept.id}`)}
+                    className="p-4 bg-purple-50 rounded-lg hover:bg-purple-100 hover:shadow-md transition-all cursor-pointer border border-purple-100"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-black truncate">{dept.name}</h3>
+                        <p className="text-sm text-gray-600 truncate">{dept.description || 'No description'}</p>
+                        <p className="text-xs text-purple-600 mt-1">{dept.users_count || 0} members</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* HODs Results - Admin Only */}
+          {isAdmin && results.hods.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <UserCog className="w-5 h-5 text-orange-600" />
+                <h2 className="text-lg font-semibold text-black">Heads of Department ({results.hods.length})</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {results.hods.map((hod) => (
+                  <div 
+                    key={hod.id} 
+                    onClick={() => navigate('/dashboard/users')}
+                    className="p-4 bg-orange-50 rounded-lg hover:bg-orange-100 hover:shadow-md transition-all cursor-pointer border border-orange-100"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                        <span className="text-orange-600 font-semibold">
+                          {(hod.name || hod.username)?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-black truncate">{hod.name || hod.username}</h3>
+                        <p className="text-sm text-gray-600 truncate">{hod.email}</p>
+                        <p className="text-xs text-orange-600 mt-1">{hod.department || hod.department_name || 'No department'}</p>
+                      </div>
+                      <span className="text-xs bg-orange-200 text-orange-800 px-2 py-1 rounded-full">HOD</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Employees Results */}
+          {results.users.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Users className="w-5 h-5 text-green-600" />
+                <h2 className="text-lg font-semibold text-black">Employees ({results.users.length})</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {results.users.map((usr) => (
+                  <div 
+                    key={usr.id} 
+                    onClick={() => navigate('/dashboard/users')}
+                    className="p-4 bg-green-50 rounded-lg hover:bg-green-100 hover:shadow-md transition-all cursor-pointer border border-green-100"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                        <span className="text-green-600 font-semibold">
+                          {(usr.name || usr.username)?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-black truncate">{usr.name || usr.username}</h3>
+                        <p className="text-sm text-gray-600 truncate">{usr.email}</p>
+                        <p className="text-xs text-green-600 mt-1">{usr.department || usr.department_name || 'No department'}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tasks Results */}
+          {results.tasks.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <ClipboardList className="w-5 h-5 text-blue-600" />
                 <h2 className="text-lg font-semibold text-black">Tasks ({results.tasks.length})</h2>
               </div>
               <div className="space-y-3">
@@ -417,7 +575,7 @@ export default function Search() {
                   <div 
                     key={task.id} 
                     onClick={() => navigate(`/dashboard/tasks/${task.id}`)}
-                    className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 hover:shadow-md transition-all cursor-pointer border border-transparent hover:border-red-200"
+                    className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 hover:shadow-md transition-all cursor-pointer border border-transparent hover:border-blue-200"
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
@@ -439,17 +597,17 @@ export default function Search() {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getStatusColor(task.status)}`}>
-                        {task.status === 'in-progress' ? 'In Progress' : task.status === 'on-hold' ? 'On Hold' : task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                        {task.status === 'in-progress' ? 'In Progress' : task.status === 'on-hold' ? 'On Hold' : task.status?.charAt(0).toUpperCase() + task.status?.slice(1)}
                       </span>
                       <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getPriorityColor(task.priority)}`}>
-                        {task.priority.toUpperCase()}
+                        {task.priority?.toUpperCase()}
                       </span>
-                      {task.department_name && (
+                      {(task.department_name || task.department) && (
                         <span className="text-xs text-gray-500 flex items-center gap-1">
                           <Building2 className="w-3 h-3" />
-                          {task.department_name}
+                          {task.department_name || task.department}
                         </span>
                       )}
                       {task.assignee_name && (
@@ -459,7 +617,6 @@ export default function Search() {
                         </span>
                       )}
                     </div>
-                    {/* Progress Bar */}
                     {task.progress !== undefined && (
                       <div className="mt-2">
                         <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
@@ -468,7 +625,7 @@ export default function Search() {
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div
-                            className="bg-red-600 h-2 rounded-full transition-all"
+                            className="bg-blue-600 h-2 rounded-full transition-all"
                             style={{ width: `${task.progress || 0}%` }}
                           />
                         </div>
@@ -480,40 +637,12 @@ export default function Search() {
             </div>
           )}
 
-          {/* Users Results */}
-          {(searchType === 'all' || searchType === 'users') && results.users.length > 0 && (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Users className="w-5 h-5 text-red-600" />
-                <h2 className="text-lg font-semibold text-black">Users ({results.users.length})</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {results.users.map((user) => (
-                  <div key={user.id} className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                        <span className="text-red-600 font-semibold">
-                          {user.username.charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-black truncate">{user.username}</h3>
-                        <p className="text-xs text-gray-600 truncate">{user.email}</p>
-                        <p className="text-xs text-gray-500">{user.department_name}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* No Results */}
-          {results.tasks.length === 0 && results.users.length === 0 && (
+          {getTotalResults() === 0 && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
               <SearchIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No results found</h3>
-              <p className="text-gray-600">Try different keywords or filters</p>
+              <p className="text-gray-600">Try different keywords or adjust your filters</p>
             </div>
           )}
         </div>
@@ -524,7 +653,26 @@ export default function Search() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
           <SearchIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Start searching</h3>
-          <p className="text-gray-600">Enter keywords to search across the system</p>
+          <p className="text-gray-600 mb-4">
+            {isEmployee 
+              ? 'Enter keywords to search your tasks'
+              : isHOD
+              ? 'Search for tasks and employees in your departments'
+              : 'Search across departments, HODs, employees, and tasks'
+            }
+          </p>
+          <div className="flex flex-wrap justify-center gap-2 text-sm">
+            {isAdmin && (
+              <>
+                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full">Departments</span>
+                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full">HODs</span>
+              </>
+            )}
+            {!isEmployee && (
+              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full">Employees</span>
+            )}
+            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full">Tasks</span>
+          </div>
         </div>
       )}
     </div>

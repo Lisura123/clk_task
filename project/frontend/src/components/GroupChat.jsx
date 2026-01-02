@@ -158,7 +158,7 @@ export default function GroupChat({ group, onClose }) {
       case 'super_admin':
         return <span className="ml-1 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">Admin</span>;
       case 'dept_admin':
-        return <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">Dept Admin</span>;
+        return <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">HOD</span>;
       default:
         return null;
     }

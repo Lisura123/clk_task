@@ -101,7 +101,7 @@ export default function SuperAdminDashboard() {
 
   const adminStats = [
     { name: 'Total Departments', value: stats.totalDepartments, icon: Building2, color: 'bg-indigo-500' },
-    { name: 'Department Admins', value: stats.deptAdmins, icon: UserCheck, color: 'bg-purple-500' },
+    { name: 'HODs', value: stats.deptAdmins, icon: UserCheck, color: 'bg-purple-500' },
     { name: 'Total Employees', value: stats.totalUsers, icon: Users, color: 'bg-blue-500' },
     { name: 'Active Users', value: stats.activeUsers, icon: Users, color: 'bg-green-500' },
   ];

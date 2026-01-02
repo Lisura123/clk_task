@@ -488,7 +488,7 @@ const Profile = () => {
                   </label>
                   <input
                     type="text"
-                    value={currentUser.role?.replace('_', ' ').toUpperCase() || 'N/A'}
+                    value={currentUser.role === 'super_admin' ? 'ADMIN' : currentUser.role === 'dept_admin' ? 'HEAD OF DEPARTMENT (HOD)' : 'EMPLOYEE'}
                     disabled
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                   />

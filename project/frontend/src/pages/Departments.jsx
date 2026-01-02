@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Building2, Users, X, Save } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { departmentAPI, userAPI } from '../services/api';
 
 export default function Departments() {
+  const navigate = useNavigate();
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -25,10 +27,10 @@ export default function Departments() {
       const response = await departmentAPI.getAllDepartments();
       const depts = Array.isArray(response.data) ? response.data : (response.data.data || []);
       
-      // The API already provides user_count for each department
+      // The API already provides users_count for each department
       const deptsWithCounts = depts.map(dept => ({
         ...dept,
-        userCount: dept.user_count ?? dept.users_count ?? 0,
+        userCount: dept.users_count ?? dept.user_count ?? 0,
       }));
       
       setDepartments(deptsWithCounts);
@@ -159,12 +161,16 @@ export default function Departments() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDepartments.length > 0 ? (
             filteredDepartments.map((dept) => (
-              <div key={dept.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+              <div 
+                key={dept.id} 
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => navigate(`/dashboard/departments/${dept.id}`)}
+              >
                 <div className="flex items-start justify-between mb-4">
                   <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
                     <Building2 className="w-6 h-6 text-red-600" />
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                     <button 
                       onClick={() => openEditModal(dept)}
                       className="p-1 text-gray-600 hover:bg-gray-100 rounded"

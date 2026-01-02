@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\GroupPlanController;
 use App\Http\Controllers\Api\GroupMessageController;
 use App\Http\Controllers\Api\DailyWorkLogController;
 use App\Http\Controllers\Api\ScheduledPlanController;
+use App\Http\Controllers\PlanDailyEntryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -41,6 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Department routes
     Route::get('/departments', [DepartmentController::class, 'index']);
+    Route::get('/departments/{id}', [DepartmentController::class, 'show']);
     Route::get('/departments/{id}/statistics', [DepartmentController::class, 'statistics']);
     Route::get('/departments/{id}/employees', [DepartmentController::class, 'employees']);
     Route::post('/departments', [DepartmentController::class, 'store']); // Super admin only
@@ -136,6 +138,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/scheduled-plans/{id}', [ScheduledPlanController::class, 'show']); // Get specific plan
     Route::put('/scheduled-plans/{id}', [ScheduledPlanController::class, 'update']); // Update plan
     Route::delete('/scheduled-plans/{id}', [ScheduledPlanController::class, 'destroy']); // Delete plan
+
+    // Plan Daily Entry routes (To-Do and Done tracking per day)
+    Route::get('/scheduled-plans/{planId}/daily-entries', [PlanDailyEntryController::class, 'index']); // Get all entries for plan
+    Route::get('/scheduled-plans/{planId}/daily-entries/{date}', [PlanDailyEntryController::class, 'show']); // Get entry for specific date
+    Route::put('/scheduled-plans/{planId}/daily-entries/{date}', [PlanDailyEntryController::class, 'update']); // Update/create entry
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);

@@ -14,10 +14,10 @@ import {
   User
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
-import axios from 'axios';
+import api, { timeEntryAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
 
-const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
+const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
   const { token, user } = useAuthStore();
   const [timeEntries, setTimeEntries] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -58,13 +58,8 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
 
   const fetchTimeEntries = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:3000/api/tasks/${taskId}/time`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (response.data.success) {
-        setTimeEntries(response.data.data.time_entries || []);
-      }
+      const response = await timeEntryAPI.getByTask(taskId);
+      setTimeEntries(response.data || []);
     } catch (err) {
       console.error('Failed to fetch time entries:', err);
     } finally {
@@ -74,13 +69,8 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
 
   const fetchTimeSummary = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:3000/api/tasks/${taskId}/time/summary`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (response.data.success) {
-        setSummary(response.data.data);
-      }
+      const response = await timeEntryAPI.getSummary(taskId);
+      setSummary(response.data);
     } catch (err) {
       console.error('Failed to fetch time summary:', err);
     }
@@ -88,12 +78,9 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
 
   const checkActiveTimer = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:3000/api/tasks/${taskId}/time/active`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (response.data.success && response.data.data) {
-        setActiveTimer(response.data.data);
+      const response = await timeEntryAPI.getRunningTimer();
+      if (response.data && response.data.task_id === parseInt(taskId)) {
+        setActiveTimer(response.data);
       }
     } catch (err) {
       console.error('Failed to check active timer:', err);
@@ -129,20 +116,20 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
 
   const handleStartTimer = async () => {
     try {
-      const response = await axios.post(
-        `http://localhost:3000/api/tasks/${taskId}/time/start`,
-        { 
-          description: timerDescription,
-          category: timerCategory
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const response = await timeEntryAPI.startTimer({
+        task_id: taskId,
+        description: timerDescription,
+        category: timerCategory
+      });
 
-      if (response.data.success) {
-        setActiveTimer(response.data.data);
-        setTimerDescription('');
-        fetchTimeEntries();
-        fetchTimeSummary();
+      setActiveTimer(response.data.entry);
+      setTimerDescription('');
+      fetchTimeEntries();
+      fetchTimeSummary();
+      
+      // If task status was updated (from todo to in_progress), notify parent
+      if (response.data.task_status_updated && onTaskUpdate) {
+        onTaskUpdate();
       }
     } catch (err) {
       console.error('Failed to start timer:', err);
@@ -154,18 +141,11 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
     if (!activeTimer) return;
 
     try {
-      const response = await axios.put(
-        `http://localhost:3000/api/tasks/time/${activeTimer.id}/stop`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (response.data.success) {
-        setActiveTimer(null);
-        setElapsedTime(0);
-        fetchTimeEntries();
-        fetchTimeSummary();
-      }
+      await timeEntryAPI.stopTimer(activeTimer.id);
+      setActiveTimer(null);
+      setElapsedTime(0);
+      fetchTimeEntries();
+      fetchTimeSummary();
     } catch (err) {
       console.error('Failed to stop timer:', err);
       alert('Failed to stop timer');
@@ -184,28 +164,23 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
     }
 
     try {
-      const response = await axios.post(
-        `http://localhost:3000/api/tasks/${taskId}/time/manual`,
-        {
-          ...manualForm,
-          duration_minutes: duration
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await timeEntryAPI.create({
+        task_id: taskId,
+        ...manualForm,
+        duration_minutes: duration
+      });
 
-      if (response.data.success) {
-        setShowManualEntry(false);
-        setManualForm({
-          start_time: '',
-          end_time: '',
-          duration_minutes: '',
-          description: '',
-          category: 'development',
-          is_billable: false
-        });
-        fetchTimeEntries();
-        fetchTimeSummary();
-      }
+      setShowManualEntry(false);
+      setManualForm({
+        start_time: '',
+        end_time: '',
+        duration_minutes: '',
+        description: '',
+        category: 'development',
+        is_billable: false
+      });
+      fetchTimeEntries();
+      fetchTimeSummary();
     } catch (err) {
       console.error('Failed to add time entry:', err);
       alert('Failed to add time entry');
@@ -216,10 +191,7 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
     if (!confirm('Are you sure you want to delete this time entry?')) return;
 
     try {
-      await axios.delete(
-        `http://localhost:3000/api/tasks/time/${entryId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await timeEntryAPI.delete(entryId);
       fetchTimeEntries();
       fetchTimeSummary();
     } catch (err) {
@@ -230,12 +202,9 @@ const TimeTracking = ({ taskId, estimatedHours = 0 }) => {
 
   const handleExportReport = async (format = 'csv') => {
     try {
-      const response = await axios.get(
-        `http://localhost:3000/api/tasks/${taskId}/time/export?format=${format}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          responseType: format === 'csv' ? 'blob' : 'json'
-        }
+      const response = await api.get(
+        `/tasks/${taskId}/time-entries/export?format=${format}`,
+        { responseType: format === 'csv' ? 'blob' : 'json' }
       );
 
       if (format === 'csv') {

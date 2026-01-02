@@ -189,26 +189,64 @@ export default function CreateEmployee() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-bold text-black">Create Employee Account</h1>
-          <p className="text-gray-600 mt-1">Create immediate active employee accounts with system access</p>
+          <p className="text-gray-600 mt-1">
+            {user?.role === 'dept_admin' 
+              ? `Add new employees to your department`
+              : 'Create immediate active employee accounts with system access'
+            }
+          </p>
         </div>
-        <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg">
-          <span className="font-semibold">Admin-Initiated</span> Registration
+        <div className={`px-4 py-2 rounded-lg ${
+          user?.role === 'dept_admin' 
+            ? 'bg-orange-100 text-orange-800' 
+            : 'bg-green-100 text-green-800'
+        }`}>
+          <span className="font-semibold">
+            {user?.role === 'dept_admin' ? 'HOD' : 'Admin'}
+          </span> Registration
         </div>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
-          <div>
-            <h3 className="font-medium text-blue-900">Admin-Initiated Registration</h3>
-            <p className="text-sm text-blue-700 mt-1">
-              Accounts created here are immediately active and ready for use. The employee will receive 
-              their login credentials and can access the system right away. No approval process required.
-            </p>
+      {/* HOD Department Context Banner */}
+      {user?.role === 'dept_admin' && departments.length > 0 && (
+        <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+              <UserPlus className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <h3 className="font-medium text-orange-900">
+                {departments.length > 1 
+                  ? `Creating Employee for Your Departments`
+                  : `Creating Employee for: ${departments[0]?.name}`
+                }
+              </h3>
+              <p className="text-sm text-orange-700">
+                {departments.length > 1 
+                  ? `You manage ${departments.length} departments: ${departments.map(d => d.name).join(', ')}`
+                  : 'As a Head of Department, you can create employee accounts for your department'
+                }
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Info Banner - Only for Admins */}
+      {user?.role === 'super_admin' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+            <div>
+              <h3 className="font-medium text-blue-900">Admin-Initiated Registration</h3>
+              <p className="text-sm text-blue-700 mt-1">
+                Accounts created here are immediately active and ready for use. The employee will receive 
+                their login credentials and can access the system right away. No approval process required.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Success Modal */}
       {showSuccess && createdEmployee && (
@@ -391,31 +429,62 @@ export default function CreateEmployee() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Department <span className="text-red-600">*</span>
                 </label>
-                <select
-                  name="department"
-                  value={user?.role === 'dept_admin' && departments.length > 0 && !formData.department 
-                    ? departments[0].name 
-                    : formData.department}
-                  onChange={handleChange}
-                  disabled={user?.role === 'dept_admin'}
-                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                    errors.department ? 'border-red-500' : 'border-gray-300'
-                  } ${user?.role === 'dept_admin' ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                >
-                  <option value="">Select Department</option>
-                  {departments.map((dept) => (
-                    <option key={dept.id} value={dept.name}>
-                      {dept.name}
-                    </option>
-                  ))}
-                </select>
+                {user?.role === 'dept_admin' ? (
+                  departments.length > 1 ? (
+                    // HOD manages multiple departments - show dropdown
+                    <div>
+                      <select
+                        name="department"
+                        value={formData.department}
+                        onChange={handleChange}
+                        className={`w-full px-4 py-2 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 bg-orange-50 ${
+                          errors.department ? 'border-red-500' : ''
+                        }`}
+                      >
+                        <option value="">Select Department</option>
+                        {departments.map((dept) => (
+                          <option key={dept.id} value={dept.name}>
+                            {dept.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-orange-600 text-xs mt-1">
+                        Select from your managed departments
+                      </p>
+                    </div>
+                  ) : (
+                    // HOD manages single department - show static
+                    <div className="w-full px-4 py-2 border border-orange-200 rounded-lg bg-orange-50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                        <span className="text-gray-700 font-medium">
+                          {departments.length > 0 ? departments[0].name : 'Loading...'}
+                        </span>
+                      </div>
+                      <p className="text-orange-600 text-xs mt-1">
+                        Your managed department
+                      </p>
+                    </div>
+                  )
+                ) : (
+                  <select
+                    name="department"
+                    value={formData.department}
+                    onChange={handleChange}
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                      errors.department ? 'border-red-500' : 'border-gray-300'
+                    }`}
+                  >
+                    <option value="">Select Department</option>
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.name}>
+                        {dept.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {errors.department && (
                   <p className="text-red-600 text-sm mt-1">{errors.department}</p>
-                )}
-                {user?.role === 'dept_admin' && (
-                  <p className="text-blue-600 text-xs mt-1">
-                    This is your managed department and cannot be changed
-                  </p>
                 )}
               </div>
 
@@ -424,20 +493,27 @@ export default function CreateEmployee() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Role <span className="text-red-600">*</span>
                 </label>
-                <select
-                  name="role"
-                  value={formData.role}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="employee">Employee</option>
-                  {user?.role === 'super_admin' && <option value="dept_admin">Department Admin</option>}
-                  {user?.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
-                </select>
-                {user?.role === 'dept_admin' && (
-                  <p className="text-gray-600 text-xs mt-1">
-                    Department admins can only create regular employees
-                  </p>
+                {user?.role === 'dept_admin' ? (
+                  <div className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-gray-700 font-medium">Employee</span>
+                    </div>
+                    <p className="text-gray-500 text-xs mt-1">
+                      HODs can create employee accounts for their department
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    name="role"
+                    value={formData.role}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    <option value="employee">Employee</option>
+                    <option value="dept_admin">Head of Department (HOD)</option>
+                    <option value="super_admin">Admin</option>
+                  </select>
                 )}
               </div>
 

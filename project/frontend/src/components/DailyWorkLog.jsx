@@ -29,7 +29,8 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
     blockers: ''
   });
 
-  const canAddLog = task?.assigned_to_id === user?.id || task?.created_by_id === user?.id;
+  // Only the assigned employee can add work logs - dept_admin and super_admin can only view
+  const canAddLog = task?.assigned_to_id === user?.id;
 
   useEffect(() => {
     fetchLogs();
@@ -331,35 +332,6 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
                   />
                 </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="blocked">Blocked</option>
-                  <option value="need_review">Need Review</option>
-                </select>
-              </div>
-
-              {(formData.status === 'blocked' || formData.status === 'need_review') && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {formData.status === 'blocked' ? 'What\'s blocking you?' : 'What needs review?'}
-                  </label>
-                  <textarea
-                    value={formData.blockers}
-                    onChange={(e) => setFormData({ ...formData, blockers: e.target.value })}
-                    rows={2}
-                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Describe the issue..."
-                  />
-                </div>
-              )}
 
               <div className="flex gap-3 pt-4">
                 <button

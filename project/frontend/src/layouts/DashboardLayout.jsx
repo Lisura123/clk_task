@@ -152,11 +152,11 @@ export default function DashboardLayout() {
     { name: 'Tasks', href: '/dashboard/tasks', icon: ClipboardList, roles: ['super_admin', 'dept_admin'] },
     { name: 'My Tasks', href: '/dashboard/my-tasks', icon: ClipboardList, roles: ['employee'] },
     { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['super_admin', 'dept_admin'] },
-    { name: 'Create Employee', href: '/dashboard/create-employee', icon: UserPlus, roles: ['super_admin'] },
-    { name: 'Pending Registrations', href: '/dashboard/pending-registrations', icon: UserCheck, roles: ['super_admin'] },
+    { name: 'Create Employee', href: '/dashboard/create-employee', icon: UserPlus, roles: ['super_admin', 'dept_admin'] },
+    { name: 'Pending Registrations', href: '/dashboard/pending-registrations', icon: UserCheck, roles: ['super_admin', 'dept_admin'] },
     { name: 'Departments', href: '/dashboard/departments', icon: Building2, roles: ['super_admin'] },
-    { name: 'Groups', href: '/dashboard/groups', icon: Users, roles: ['super_admin', 'dept_admin'] },
-    { name: 'Schedule', href: '/dashboard/schedule', icon: Calendar, roles: ['super_admin', 'dept_admin'] },
+    { name: 'Groups', href: '/dashboard/groups', icon: Users, roles: ['dept_admin'] },
+    { name: 'Schedule', href: '/dashboard/schedule', icon: Calendar, roles: ['dept_admin', 'employee'] },
     { name: 'Search', href: '/dashboard/search', icon: Search, roles: ['super_admin', 'dept_admin', 'employee'] },
   ];
 
@@ -395,7 +395,7 @@ export default function DashboardLayout() {
               >
                 <div className="hidden sm:block text-right">
                   <p className="text-sm font-medium text-black">{user?.username}</p>
-                  <p className="text-xs text-gray-600">{user?.role?.replace('_', ' ')}</p>
+                  <p className="text-xs text-gray-600">{user?.role === 'super_admin' ? 'Admin' : user?.role === 'dept_admin' ? 'HOD' : 'Employee'}</p>
                 </div>
                 <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
                   <span className="text-red-600 font-semibold text-sm">

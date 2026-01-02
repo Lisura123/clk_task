@@ -104,7 +104,7 @@ export default function PendingRegistrations() {
             <h3 className="font-medium text-blue-900">Self-Registration Approval Process</h3>
             <p className="text-sm text-blue-700 mt-1">
               These are employees who registered themselves through the public registration form. 
-              Each requires Super Admin approval to activate their account and grant system access.
+              Each requires Admin approval to activate their account and grant system access.
             </p>
           </div>
         </div>

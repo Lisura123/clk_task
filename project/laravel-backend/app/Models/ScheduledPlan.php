@@ -14,22 +14,17 @@ class ScheduledPlan extends Model
         'description',
         'department_id',
         'created_by',
-        'assigned_to',
-        'scheduled_date',
-        'start_time',
-        'end_time',
-        'type',
-        'status',
-        'priority',
+        'start_date',
+        'end_date',
         'is_recurring',
         'recurrence_pattern',
         'recurrence_end_date',
         'notes',
-        'location',
     ];
 
     protected $casts = [
-        'scheduled_date' => 'date',
+        'start_date' => 'date',
+        'end_date' => 'date',
         'recurrence_end_date' => 'date',
         'is_recurring' => 'boolean',
     ];
@@ -44,19 +39,30 @@ class ScheduledPlan extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function assignee()
+    public function dailyEntries()
     {
-        return $this->belongsTo(User::class, 'assigned_to');
+        return $this->hasMany(PlanDailyEntry::class);
+    }
+
+    public function getDailyEntryForDate($date)
+    {
+        return $this->dailyEntries()->where('entry_date', $date)->first();
     }
 
     // Get plans for a specific date range
     public static function getForDateRange($departmentId, $startDate, $endDate)
     {
         return static::where('department_id', $departmentId)
-            ->whereBetween('scheduled_date', [$startDate, $endDate])
-            ->with(['creator', 'assignee'])
-            ->orderBy('scheduled_date')
-            ->orderBy('start_time')
+            ->where(function($query) use ($startDate, $endDate) {
+                $query->whereBetween('start_date', [$startDate, $endDate])
+                    ->orWhereBetween('end_date', [$startDate, $endDate])
+                    ->orWhere(function($q) use ($startDate, $endDate) {
+                        $q->where('start_date', '<=', $startDate)
+                          ->where('end_date', '>=', $endDate);
+                    });
+            })
+            ->with(['creator', 'department'])
+            ->orderBy('start_date')
             ->get();
     }
 }

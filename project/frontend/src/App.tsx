@@ -15,6 +15,7 @@ import Users from './pages/Users';
 import CreateEmployee from './pages/CreateEmployee';
 import PendingRegistrations from './pages/PendingRegistrations';
 import Departments from './pages/Departments';
+import DepartmentDetails from './pages/DepartmentDetails';
 import Groups from './pages/Groups';
 import Schedule from './pages/Schedule';
 import Settings from './pages/Settings';
@@ -101,7 +102,7 @@ function App() {
           <Route
             path="dashboard/create-employee"
             element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
                 <CreateEmployee />
               </ProtectedRoute>
             }
@@ -109,7 +110,7 @@ function App() {
           <Route
             path="dashboard/pending-registrations"
             element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
                 <PendingRegistrations />
               </ProtectedRoute>
             }
@@ -124,6 +125,14 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="dashboard/departments/:id"
+            element={
+              <ProtectedRoute allowedRoles={['super_admin']}>
+                <DepartmentDetails />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Dashboard Group Management */}
           <Route
@@ -135,11 +144,11 @@ function App() {
             }
           />
 
-          {/* Schedule - Department admins can manage schedules */}
+          {/* Schedule - All users can view, admins can manage */}
           <Route
             path="dashboard/schedule"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
                 <Schedule />
               </ProtectedRoute>
             }

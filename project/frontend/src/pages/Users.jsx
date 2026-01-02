@@ -16,9 +16,7 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [departmentFilter, setDepartmentFilter] = useState(
-    user?.role === 'dept_admin' && user?.department_id ? user.department_id : 'all'
-  );
+  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -38,6 +36,26 @@ export default function Users() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Set department filter for HODs when departments are loaded
+  useEffect(() => {
+    if (user?.role === 'dept_admin' && departments.length > 0 && departmentFilter === 'all') {
+      const managedIds = (user.managed_department_ids || [])
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0);
+      
+      const managedDepts = departments.filter(d => 
+        managedIds.length > 0 
+          ? managedIds.includes(Number(d.id))
+          : Number(d.id) === Number(user.department_id)
+      );
+      
+      // If only one department, set it as the filter; otherwise default to 'all' (managed only)
+      if (managedDepts.length === 1) {
+        setDepartmentFilter(managedDepts[0].id);
+      }
+    }
+  }, [user, departments, departmentFilter]);
 
   // Generate secure password
   const generatePassword = () => {
@@ -211,7 +229,26 @@ export default function Users() {
     const matchesSearch = u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          u.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || u.role === roleFilter;
-    const matchesDept = departmentFilter === 'all' || u.department_id == departmentFilter;
+    
+    // Handle department filter for HODs with managed departments
+    let matchesDept = true;
+    if (departmentFilter === 'all') {
+      // For HODs, 'all' means all managed departments, not all departments
+      if (user.role === 'dept_admin') {
+        const managedIds = (user.managed_department_ids || [])
+          .map(id => Number(id))
+          .filter(id => Number.isFinite(id) && id > 0);
+        if (managedIds.length > 0) {
+          matchesDept = managedIds.includes(Number(u.department_id));
+        } else {
+          matchesDept = Number(u.department_id) === Number(user.department_id);
+        }
+      }
+      // For super_admin, 'all' means all departments - no filtering needed
+    } else {
+      matchesDept = u.department_id == departmentFilter;
+    }
+    
     const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
     return matchesSearch && matchesRole && matchesDept && matchesStatus;
   });
@@ -259,7 +296,7 @@ export default function Users() {
           <div className="flex items-center justify-between mb-2">
             <UserPlus className="w-8 h-8 text-purple-600" />
           </div>
-          <h3 className="text-gray-600 text-sm font-medium">Department Admins</h3>
+          <h3 className="text-gray-600 text-sm font-medium">HODs</h3>
           <p className="text-3xl font-bold text-black mt-1">{stats.deptAdmins}</p>
         </div>
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -317,23 +354,50 @@ export default function Users() {
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           >
             <option value="all">All Roles</option>
-            {user.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
-            <option value="dept_admin">Department Admin</option>
+            {user.role === 'super_admin' && <option value="super_admin">Admin</option>}
+            <option value="dept_admin">HOD</option>
             <option value="employee">Employee</option>
           </select>
 
           {/* Department Filter */}
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            disabled={user?.role === 'dept_admin'}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-          >
-            {user?.role !== 'dept_admin' && <option value="all">All Departments</option>}
-            {departments.map(dept => (
-              <option key={dept.id} value={dept.id}>{dept.name}</option>
-            ))}
-          </select>
+          {(() => {
+            const managedIds = (user.managed_department_ids || [])
+              .map(id => Number(id))
+              .filter(id => Number.isFinite(id) && id > 0);
+            const isMultiDeptHOD = user.role === 'dept_admin' && managedIds.length > 1;
+            const isSingleDeptHOD = user.role === 'dept_admin' && !isMultiDeptHOD;
+            
+            return (
+              <select
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                disabled={isSingleDeptHOD}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                {/* Show 'All' option for admins or multi-dept HODs */}
+                {(user.role === 'super_admin' || isMultiDeptHOD) && (
+                  <option value="all">
+                    {isMultiDeptHOD ? 'All My Departments' : 'All Departments'}
+                  </option>
+                )}
+                {departments
+                  .filter(dept => {
+                    if (user.role === 'super_admin') return true;
+                    if (user.role === 'dept_admin') {
+                      if (managedIds.length > 0) {
+                        return managedIds.includes(Number(dept.id));
+                      }
+                      return Number(dept.id) === Number(user.department_id);
+                    }
+                    return false;
+                  })
+                  .map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))
+                }
+              </select>
+            );
+          })()}
 
           {/* Status Filter */}
           <select
@@ -383,7 +447,7 @@ export default function Users() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-600">Role:</span>
                     <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getRoleBadgeColor(u.role)}`}>
-                      {u.role.replace('_', ' ')}
+                      {u.role === 'super_admin' ? 'Admin' : u.role === 'dept_admin' ? 'HOD' : 'Employee'}
                     </span>
                   </div>
                 </div>
@@ -517,8 +581,8 @@ export default function Users() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent bg-white"
                   >
                     <option value="employee">Employee</option>
-                    <option value="dept_admin">Department Admin</option>
-                    {user.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
+                    <option value="dept_admin">Head of Department (HOD)</option>
+                    {user.role === 'super_admin' && <option value="super_admin">Admin</option>}
                   </select>
                 </div>
               </div>
@@ -692,8 +756,8 @@ export default function Users() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
                   <option value="employee">Employee</option>
-                  <option value="dept_admin">Department Admin</option>
-                  {user.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
+                  <option value="dept_admin">Head of Department (HOD)</option>
+                  {user.role === 'super_admin' && <option value="super_admin">Admin</option>}
                 </select>
               </div>
 

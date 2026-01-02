@@ -19,6 +19,15 @@ class DepartmentController extends Controller
     }
 
     /**
+     * Get a single department by ID
+     */
+    public function show($id)
+    {
+        $department = Department::withCount(['users', 'tasks'])->findOrFail($id);
+        return response()->json($department);
+    }
+
+    /**
      * Public lightweight department list for registration dropdown
      */
     public function publicList()
@@ -162,7 +171,13 @@ class DepartmentController extends Controller
             }
         }
 
-        $query = $department->users()->where('role', 'employee');
+        // For Administration department, get all users (admins)
+        // For other departments, only get employees
+        if ($department->name === 'Administration') {
+            $query = $department->users();
+        } else {
+            $query = $department->users()->where('role', 'employee');
+        }
 
         if ($request->has('status')) {
             $query->where('status', $request->status);

@@ -130,7 +130,7 @@ export default function Settings() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
                     <input
                       type="text"
-                      value={user?.role?.replace('_', ' ')}
+                      value={user?.role === 'super_admin' ? 'Admin' : user?.role === 'dept_admin' ? 'Head of Department (HOD)' : 'Employee'}
                       disabled
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                     />

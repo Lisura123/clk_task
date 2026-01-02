@@ -110,7 +110,9 @@ class UserController extends Controller
 
         if ($user->isDeptAdmin()) {
             $managedDepts = $user->managed_department_ids ?? [];
-            $query->whereIn('department', $managedDepts);
+            // Get department names from IDs
+            $deptNames = Department::whereIn('id', $managedDepts)->pluck('name')->toArray();
+            $query->whereIn('department', $deptNames);
         }
 
         $pending = $query->latest()->get();
@@ -230,8 +232,14 @@ class UserController extends Controller
         }
 
         // Check if dept admin can create user in this department
-        if ($user->isDeptAdmin() && !$user->managesDepartment($request->department)) {
-            return response()->json(['message' => 'You cannot create users for this department'], 403);
+        if ($user->isDeptAdmin()) {
+            // HODs can only create employees, not other HODs
+            if ($request->role !== 'employee') {
+                return response()->json(['message' => 'HODs can only create employee accounts'], 403);
+            }
+            if (!$user->managesDepartment($request->department)) {
+                return response()->json(['message' => 'You cannot create users for this department'], 403);
+            }
         }
 
         // Get department_id

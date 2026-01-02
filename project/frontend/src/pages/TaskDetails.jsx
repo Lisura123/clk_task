@@ -967,7 +967,7 @@ const TaskDetails = () => {
                   <div className="flex-1">
                     <p className="text-sm text-gray-600">Created By</p>
                     <p className="font-medium text-gray-900">
-                      {task.creator_name || task.created_by_name || 'Unknown'}
+                      {task.created_by?.name || task.creator_name || task.created_by_name || 'Unknown'}
                     </p>
                   </div>
                 </div>
@@ -977,7 +977,7 @@ const TaskDetails = () => {
                   <div className="flex-1">
                     <p className="text-sm text-gray-600">Assigned To</p>
                     <p className="font-medium text-gray-900">
-                      {task.assignee_name || task.assigned_to_name || 'Unassigned'}
+                      {task.assigned_to?.name || task.assignee_name || task.assigned_to_name || 'Unassigned'}
                     </p>
                   </div>
                 </div>
@@ -1353,7 +1353,8 @@ const TaskDetails = () => {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-800">Daily Work Logs</h3>
-            {(task?.assigned_to_id === user?.id || task?.created_by_id === user?.id) && (
+            {/* Only task assignee can log work - dept_admin and super_admin can only view */}
+            {task?.assigned_to_id === user?.id && (
               <button
                 onClick={() => setShowWorkLogModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"

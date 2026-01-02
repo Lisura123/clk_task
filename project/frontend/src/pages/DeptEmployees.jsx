@@ -178,7 +178,7 @@ const DeptEmployees = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">Dept Admins</p>
+              <p className="text-sm text-gray-600">HODs</p>
               <p className="text-2xl font-bold text-purple-600">{stats.deptAdmins}</p>
             </div>
             <Shield className="w-8 h-8 text-purple-400" />
@@ -217,7 +217,7 @@ const DeptEmployees = () => {
           >
             <option value="all">All Roles</option>
             <option value="employee">Employee</option>
-            <option value="dept_admin">Department Admin</option>
+            <option value="dept_admin">HOD</option>
           </select>
 
           <select
@@ -289,7 +289,7 @@ const DeptEmployees = () => {
                 <div className="flex items-center gap-2 text-sm">
                   <Shield className="w-4 h-4 text-gray-500" />
                   <span className={`text-xs px-2 py-0.5 rounded-full border ${getRoleBadge(employee.role)}`}>
-                    {employee.role?.replace('_', ' ').toUpperCase()}
+                    {employee.role === 'super_admin' ? 'ADMIN' : employee.role === 'dept_admin' ? 'HOD' : 'EMPLOYEE'}
                   </span>
                 </div>
               </div>
@@ -365,7 +365,7 @@ const DeptEmployees = () => {
 
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                   <p className="text-sm text-yellow-800">
-                    <strong>Note:</strong> You can only edit basic information. Role and status changes require Super Admin approval.
+                    <strong>Note:</strong> You can only edit basic information. Role and status changes require Admin approval.
                   </p>
                 </div>
 

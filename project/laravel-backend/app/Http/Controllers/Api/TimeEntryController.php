@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\TimeEntry;
+use App\Models\Task;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
@@ -50,6 +51,13 @@ class TimeEntryController extends Controller
             ], 422);
         }
 
+        // Get the task and update status to in_progress if it's currently todo
+        $task = Task::find($request->task_id);
+        if ($task && $task->status === 'todo') {
+            $task->status = 'in_progress';
+            $task->save();
+        }
+
         $entry = TimeEntry::create([
             'task_id' => $request->task_id,
             'user_id' => $request->user()->id,
@@ -63,6 +71,7 @@ class TimeEntryController extends Controller
         return response()->json([
             'message' => 'Timer started successfully',
             'entry' => $entry,
+            'task_status_updated' => $task && $task->wasChanged('status'),
         ], 201);
     }
 

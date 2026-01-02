@@ -90,7 +90,9 @@ export const departmentAPI = {
   getEmployees: (id, params) => api.get(`/departments/${id}/employees`, { params }),
   create: (data) => api.post('/departments', data),
   update: (id, data) => api.put(`/departments/${id}`, data),
+  updateDepartment: (id, data) => api.put(`/departments/${id}`, data),
   delete: (id) => api.delete(`/departments/${id}`),
+  deleteDepartment: (id) => api.delete(`/departments/${id}`),
 };
 
 // Task APIs
@@ -192,6 +194,13 @@ export const scheduledPlanAPI = {
   create: (data) => api.post('/scheduled-plans', data),
   update: (id, data) => api.put(`/scheduled-plans/${id}`, data),
   delete: (id) => api.delete(`/scheduled-plans/${id}`),
+};
+
+// Plan Daily Entry API (To-Do and Done tracking per day per plan)
+export const planDailyEntryAPI = {
+  getAll: (planId) => api.get(`/scheduled-plans/${planId}/daily-entries`),
+  getByDate: (planId, date) => api.get(`/scheduled-plans/${planId}/daily-entries/${date}`),
+  update: (planId, date, data) => api.put(`/scheduled-plans/${planId}/daily-entries/${date}`, data),
 };
 
 export default api;

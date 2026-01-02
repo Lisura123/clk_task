@@ -8,6 +8,7 @@ use App\Models\TaskActivity;
 use App\Models\Notification;
 use App\Models\User;
 use App\Models\Department;
+use App\Notifications\TaskAssignedNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -195,6 +196,16 @@ class TaskController extends Controller
                 'message' => "You have been assigned a new task: {$task->title}",
                 'task_id' => $task->id,
             ]);
+
+            // Send email notification to the assigned employee
+            $assignedUser = User::find($task->assigned_to_id);
+            if ($assignedUser && $assignedUser->email) {
+                try {
+                    $assignedUser->notify(new TaskAssignedNotification($task, $user));
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send task assignment email: ' . $e->getMessage());
+                }
+            }
         }
 
         return response()->json([
@@ -263,6 +274,7 @@ class TaskController extends Controller
         }
 
         $oldData = $task->toArray();
+        $oldAssignedToId = $task->assigned_to_id;
         $task->update($request->all());
 
         // Auto-complete when progress reaches 100%
@@ -271,6 +283,29 @@ class TaskController extends Controller
                 'status' => 'completed',
                 'completed_at' => now(),
             ]);
+        }
+
+        // Send email notification if task is reassigned to a different user
+        if ($request->has('assigned_to_id') && $request->assigned_to_id != $oldAssignedToId && $request->assigned_to_id) {
+            // Create in-app notification
+            Notification::create([
+                'user_id' => $request->assigned_to_id,
+                'triggered_by_id' => $user->id,
+                'type' => 'task_assigned',
+                'title' => 'Task Assigned to You',
+                'message' => "You have been assigned a task: {$task->title}",
+                'task_id' => $task->id,
+            ]);
+
+            // Send email notification
+            $assignedUser = User::find($request->assigned_to_id);
+            if ($assignedUser && $assignedUser->email) {
+                try {
+                    $assignedUser->notify(new TaskAssignedNotification($task, $user));
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send task reassignment email: ' . $e->getMessage());
+                }
+            }
         }
 
         // Track changes in activity log
@@ -361,7 +396,10 @@ class TaskController extends Controller
             }
             
             if (!empty($managedDepts)) {
-                $query->whereIn('department', $managedDepts);
+                // Get department names from IDs since tasks store department names in 'department' column
+                $deptNames = Department::whereIn('id', $managedDepts)->pluck('name')->toArray();
+                // Tasks only have 'department' column which stores department name
+                $query->whereIn('department', $deptNames);
             }
         }
 
@@ -384,6 +422,7 @@ class TaskController extends Controller
             'overdue' => $overdue,
             'completionRate' => $total > 0 ? round(($completed / $total) * 100, 2) : 0,
             'priority' => [
+                'urgent' => (clone $query)->where('priority', 'urgent')->count(),
                 'high' => (clone $query)->where('priority', 'high')->count(),
                 'medium' => (clone $query)->where('priority', 'medium')->count(),
                 'low' => (clone $query)->where('priority', 'low')->count(),
@@ -409,12 +448,13 @@ class TaskController extends Controller
                 $managedDepts = [$user->department_id];
             }
             
-            // Count employees in managed departments
-            $totalEmployees = User::where('status', '!=', 'pending')
-                ->where(function($q) use ($managedDepts) {
-                    $q->whereIn('department_id', $managedDepts)
-                      ->orWhereIn('department', $managedDepts);
-                })
+            // Get department names for filtering
+            $deptNames = Department::whereIn('id', $managedDepts)->pluck('name')->toArray();
+            
+            // Count employees in managed departments (only active employees, exclude super_admin)
+            $totalEmployees = User::where('status', 'active')
+                ->where('role', '!=', 'super_admin')
+                ->whereIn('department', $deptNames)
                 ->count();
             
             $stats['totalEmployees'] = $totalEmployees;
@@ -424,7 +464,8 @@ class TaskController extends Controller
             foreach ($managedDepts as $deptId) {
                 $dept = Department::find($deptId);
                 if ($dept) {
-                    $deptTaskQuery = Task::where('department', $deptId);
+                    // Query tasks by department name (tasks store department name in 'department' column)
+                    $deptTaskQuery = Task::where('department', $dept->name);
                     $departmentStats[] = [
                         'id' => $dept->id,
                         'department' => $dept->name,

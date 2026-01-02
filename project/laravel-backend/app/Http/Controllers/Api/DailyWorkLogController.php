@@ -129,9 +129,9 @@ class DailyWorkLogController extends Controller
     {
         $user = Auth::user();
 
-        // Only assigned user can log work (or task creator)
-        if ($task->assigned_to_id !== $user->id && $task->created_by_id !== $user->id) {
-            return response()->json(['error' => 'You can only log work on tasks assigned to you'], 403);
+        // Only assigned employee can log work - dept_admin and super_admin can only view
+        if ($task->assigned_to_id !== $user->id) {
+            return response()->json(['error' => 'Only the assigned employee can log work on this task'], 403);
         }
 
         $validated = $request->validate([

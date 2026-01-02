@@ -9,6 +9,7 @@ import DailyWorkLog from '../components/DailyWorkLog';
 export default function Tasks() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  
   const [tasks, setTasks] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [users, setUsers] = useState([]);
@@ -109,10 +110,21 @@ export default function Tasks() {
   // Set department filter for dept admin after departments are loaded
   useEffect(() => {
     if (user?.role === 'dept_admin' && departments.length > 0 && departmentFilter === 'all') {
-      const deptName = user?.department || departments.find(d => parseInt(d.id) === parseInt(user?.department_id))?.name;
-      if (deptName) {
-        setDepartmentFilter(deptName);
+      // For HOD, check how many departments they manage
+      const managedIds = (user.managed_department_ids || [])
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id) && id > 0);
+      
+      const managedDepts = departments.filter(d => 
+        managedIds.includes(Number(d.id)) || Number(d.id) === Number(user.department_id)
+      );
+      
+      // If HOD manages multiple departments, keep "all" to show all their tasks
+      // If only one department, set it as the filter
+      if (managedDepts.length === 1) {
+        setDepartmentFilter(managedDepts[0].name);
       }
+      // If multiple, leave as 'all' so they see all their departments' tasks
     }
   }, [departments, user]);
 
@@ -121,7 +133,23 @@ export default function Tasks() {
                          task.description?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
-    const matchesDepartment = departmentFilter === 'all' || task.department === departmentFilter;
+    
+    // For HODs with "all" filter, only show tasks from their managed departments
+    let matchesDepartment = true;
+    if (departmentFilter === 'all') {
+      if (user?.role === 'dept_admin') {
+        const managedIds = (user.managed_department_ids || [])
+          .map(id => Number(id))
+          .filter(id => Number.isFinite(id) && id > 0);
+        const managedDeptNames = departments
+          .filter(d => managedIds.includes(Number(d.id)) || Number(d.id) === Number(user.department_id))
+          .map(d => d.name);
+        matchesDepartment = managedDeptNames.includes(task.department);
+      }
+      // For super_admin, 'all' means all departments - no filtering needed
+    } else {
+      matchesDepartment = task.department === departmentFilter;
+    }
     
     let matchesDateRange = true;
     if (dateFrom) {
@@ -137,8 +165,28 @@ export default function Tasks() {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      // Resolve department name: prefer user.department; fallback from departments list by id
-      const deptName = user?.department || (departments.find(d => parseInt(d.id) === parseInt(user?.department_id))?.name) || '';
+      // Resolve department name based on role
+      let deptName = '';
+      
+      if (user?.role === 'dept_admin') {
+        // For HOD, use their managed department
+        const managedIds = (user.managed_department_ids || [])
+          .map(id => Number(id))
+          .filter(id => Number.isFinite(id) && id > 0);
+        
+        if (managedIds.length > 0) {
+          const managedDept = departments.find(d => managedIds.includes(Number(d.id)));
+          deptName = managedDept?.name || '';
+        }
+        
+        // Fallback to department_id if no managed departments
+        if (!deptName && user.department_id) {
+          deptName = departments.find(d => Number(d.id) === Number(user.department_id))?.name || '';
+        }
+      } else {
+        // For other roles, use their department
+        deptName = user?.department || (departments.find(d => parseInt(d.id) === parseInt(user?.department_id))?.name) || '';
+      }
       
       // Validate department is not empty
       if (!deptName) {
@@ -404,13 +452,42 @@ export default function Tasks() {
           <select
             value={departmentFilter}
             onChange={(e) => setDepartmentFilter(e.target.value)}
-            disabled={user?.role === 'dept_admin'}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+            className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
+              user?.role === 'dept_admin' ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
+            }`}
           >
-            {user?.role !== 'dept_admin' && <option value="all">All Departments</option>}
-            {departments.map(dept => (
-              <option key={dept.id} value={dept.name}>{dept.name}</option>
-            ))}
+            {user?.role === 'dept_admin' ? (
+              // For HODs, show "All My Departments" option if they manage multiple
+              <>
+                {(() => {
+                  const managedIds = (user.managed_department_ids || [])
+                    .map(id => Number(id))
+                    .filter(id => Number.isFinite(id) && id > 0);
+                  const managedDepts = departments.filter(dept => 
+                    managedIds.includes(Number(dept.id)) || Number(dept.id) === Number(user.department_id)
+                  );
+                  return managedDepts.length > 1 && <option value="all">All My Departments</option>;
+                })()}
+                {departments
+                  .filter(dept => {
+                    const managedIds = (user.managed_department_ids || [])
+                      .map(id => Number(id))
+                      .filter(id => Number.isFinite(id) && id > 0);
+                    return managedIds.includes(Number(dept.id)) || Number(dept.id) === Number(user.department_id);
+                  })
+                  .map(dept => (
+                    <option key={dept.id} value={dept.name}>{dept.name}</option>
+                  ))
+                }
+              </>
+            ) : (
+              <>
+                <option value="all">All Departments</option>
+                {departments.map(dept => (
+                  <option key={dept.id} value={dept.name}>{dept.name}</option>
+                ))}
+              </>
+            )}
           </select>
 
           {/* Date From */}
@@ -639,36 +716,48 @@ export default function Tasks() {
               {/* Department field for create modal */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Department *</label>
-                <select
-                  value={formData.department_id}
-                  onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-                  disabled={user.role === 'dept_admin'}
-                  required
-                >
-                  {user.role !== 'dept_admin' && <option value="">Select Department</option>}
-                  {departments
-                    .filter(dept => {
-                      if (user.role === 'super_admin') return true;
-                      if (user.role === 'dept_admin') {
-                        const managedIds = (user.managed_department_ids || [])
-                          .map(id => Number(id))
-                          .filter(id => Number.isFinite(id) && id > 0);
-                        if (managedIds.length > 0) {
-                          return managedIds.includes(Number(dept.id));
-                        }
-                        return Number(dept.id) === Number(user.department_id);
+                {(() => {
+                  const managedIds = (user.managed_department_ids || [])
+                    .map(id => Number(id))
+                    .filter(id => Number.isFinite(id) && id > 0);
+                  const isMultiDeptHOD = user.role === 'dept_admin' && managedIds.length > 1;
+                  const isSingleDeptHOD = user.role === 'dept_admin' && managedIds.length <= 1;
+                  
+                  // Filter departments for HODs
+                  const filteredDepts = departments.filter(dept => {
+                    if (user.role === 'super_admin') return true;
+                    if (user.role === 'dept_admin') {
+                      if (managedIds.length > 0) {
+                        return managedIds.includes(Number(dept.id));
                       }
-                      return false;
-                    })
-                    .map(dept => (
-                      <option key={dept.id} value={dept.id}>{dept.name}</option>
-                    ))
-                  }
-                </select>
-                {user.role === 'dept_admin' && (
-                  <p className="text-xs text-gray-500 mt-1">Department is pre-selected based on your role</p>
-                )}
+                      return Number(dept.id) === Number(user.department_id);
+                    }
+                    return false;
+                  });
+                  
+                  return (
+                    <>
+                      <select
+                        value={formData.department_id}
+                        onChange={(e) => setFormData({ ...formData, department_id: e.target.value, assigned_to: '' })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                        disabled={isSingleDeptHOD}
+                        required
+                      >
+                        {user.role === 'super_admin' && <option value="">Select Department</option>}
+                        {filteredDepts.map(dept => (
+                          <option key={dept.id} value={dept.id}>{dept.name}</option>
+                        ))}
+                      </select>
+                      {isSingleDeptHOD && (
+                        <p className="text-xs text-gray-500 mt-1">Department is pre-selected based on your role</p>
+                      )}
+                      {isMultiDeptHOD && (
+                        <p className="text-xs text-blue-600 mt-1">Select from your managed departments</p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               <div>

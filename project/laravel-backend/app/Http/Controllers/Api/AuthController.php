@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Notification;
+use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -46,13 +47,33 @@ class AuthController extends Controller
         ]);
 
         // Notify all super admins and dept admins of the department about new registration
-        $admins = User::where('role', 'super_admin')
-            ->orWhere(function($query) use ($request) {
-                $query->where('role', 'dept_admin')
-                      ->whereJsonContains('managed_department_ids', $request->department);
-            })
+        // First, find the department ID from the department name
+        $department = Department::where('name', $request->department)->first();
+        $departmentId = $department ? $department->id : null;
+        
+        // Get super admins
+        $superAdmins = User::where('role', 'super_admin')
             ->where('status', 'active')
             ->get();
+        
+        // Get HODs who manage this department
+        $hodAdmins = collect();
+        if ($departmentId) {
+            $hodAdmins = User::where('role', 'dept_admin')
+                ->where('status', 'active')
+                ->whereNotNull('managed_department_ids')
+                ->get()
+                ->filter(function($admin) use ($departmentId) {
+                    $managedDepts = $admin->managed_department_ids;
+                    if (is_string($managedDepts)) {
+                        $managedDepts = json_decode($managedDepts, true);
+                    }
+                    return is_array($managedDepts) && in_array($departmentId, $managedDepts);
+                });
+        }
+        
+        // Merge and deduplicate admins
+        $admins = $superAdmins->merge($hodAdmins)->unique('id');
 
         foreach ($admins as $admin) {
             Notification::create([
@@ -60,7 +81,7 @@ class AuthController extends Controller
                 'triggered_by_id' => $user->id,
                 'type' => 'new_registration',
                 'title' => 'New User Registration',
-                'message' => "{$user->name} has registered and is awaiting approval.",
+                'message' => "{$user->name} has registered for {$request->department} and is awaiting approval.",
                 'task_id' => null,
             ]);
         }
