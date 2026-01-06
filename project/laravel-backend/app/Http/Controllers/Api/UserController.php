@@ -41,14 +41,22 @@ class UserController extends Controller
             ]);
             
             if (!empty($managedDeptIds)) {
-                $query->whereIn('department_id', $managedDeptIds);
+                // Get department names for the managed department IDs
+                $deptNames = Department::whereIn('id', $managedDeptIds)->pluck('name')->toArray();
+                
+                // Filter by department_id OR department name (for users without department_id)
+                $query->where(function($q) use ($managedDeptIds, $deptNames) {
+                    $q->whereIn('department_id', $managedDeptIds)
+                      ->orWhereIn('department', $deptNames);
+                });
                 
                 // Log the SQL query
                 $sql = $query->toSql();
                 $bindings = $query->getBindings();
                 \Log::info('SQL Query', [
                     'sql' => $sql,
-                    'bindings' => json_encode($bindings)
+                    'bindings' => json_encode($bindings),
+                    'dept_names' => $deptNames
                 ]);
             } else {
                 // If no managed departments, return empty result
@@ -139,7 +147,16 @@ class UserController extends Controller
             return response()->json(['message' => 'You cannot approve users from this department'], 403);
         }
 
-        $targetUser->update(['status' => 'active']);
+        // Set department_id if not already set (for self-registered users)
+        $updateData = ['status' => 'active'];
+        if (!$targetUser->department_id && $targetUser->department) {
+            $department = Department::where('name', $targetUser->department)->first();
+            if ($department) {
+                $updateData['department_id'] = $department->id;
+            }
+        }
+        
+        $targetUser->update($updateData);
 
         // Send email notification to the approved user
         try {
@@ -308,7 +325,7 @@ class UserController extends Controller
             'role' => 'sometimes|in:employee,dept_admin,super_admin',
             'phone' => 'sometimes|nullable|string|max:20',
             'phone_number' => 'sometimes|nullable|string|max:20',
-            'status' => 'sometimes|in:pending,active,inactive',
+            'status' => 'sometimes|in:pending,active,inactive,rejected',
             'managed_department_ids' => 'sometimes|nullable|array',
         ]);
 

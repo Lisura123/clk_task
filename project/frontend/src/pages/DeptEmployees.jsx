@@ -82,9 +82,9 @@ const DeptEmployees = () => {
 
   const handleEdit = (employee) => {
     setFormData({
-      full_name: employee.full_name || '',
+      name: employee.name || '',
       email: employee.email || '',
-      phone_number: employee.phone_number || '',
+      phone: employee.phone || '',
       department_id: employee.department_id || ''
     });
     setEditModal({ open: true, employee });
@@ -328,8 +328,8 @@ const DeptEmployees = () => {
                   </label>
                   <input
                     type="text"
-                    name="full_name"
-                    value={formData.full_name}
+                    name="name"
+                    value={formData.name || ''}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                     required
@@ -343,7 +343,7 @@ const DeptEmployees = () => {
                   <input
                     type="email"
                     name="email"
-                    value={formData.email}
+                    value={formData.email || ''}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                     required
@@ -356,8 +356,8 @@ const DeptEmployees = () => {
                   </label>
                   <input
                     type="tel"
-                    name="phone_number"
-                    value={formData.phone_number}
+                    name="phone"
+                    value={formData.phone || ''}
                     onChange={handleInputChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                   />

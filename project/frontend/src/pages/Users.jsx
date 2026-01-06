@@ -26,7 +26,7 @@ export default function Users() {
     username: '',
     email: '',
     password: '',
-    phone_number: '',
+    phone: '',
     department_id: '',
     role: 'employee',
     status: 'active',
@@ -72,9 +72,7 @@ export default function Users() {
     try {
       setLoading(true);
       const [usersRes, deptsRes] = await Promise.all([
-        user.role === 'super_admin' 
-          ? userAPI.getAllUsers()
-          : userAPI.getAllUsers(), // Dept admin sees users from all their managed departments
+        userAPI.getAllUsers({ per_page: 1000 }), // Get all users for accurate counts
         departmentAPI.getAllDepartments()
       ]);
       const allUsers = (usersRes.data.data || []).filter(u => u.status !== 'pending');
@@ -97,10 +95,11 @@ export default function Users() {
   const handleEdit = (userData) => {
     setSelectedUser(userData);
     setFormData({
+      name: userData.name || '',
       username: userData.username,
       email: userData.email,
       password: '',
-      phone_number: userData.phone_number || '',
+      phone: userData.phone || '',
       department_id: userData.department_id || '',
       role: userData.role,
       status: userData.status,
@@ -117,7 +116,7 @@ export default function Users() {
       username: '',
       email: '',
       password: initialPassword,
-      phone_number: '',
+      phone: '',
       department_id: '',
       role: 'employee',
       status: 'active',
@@ -150,7 +149,7 @@ export default function Users() {
         department: department?.name || '',
         department_id: formData.department_id,
         role: formData.role,
-        phone: formData.phone_number,
+        phone: formData.phone,
         managed_department_ids: formData.managed_department_ids || []
       };
       
@@ -161,7 +160,7 @@ export default function Users() {
         username: '',
         email: '',
         password: '',
-        phone_number: '',
+        phone: '',
         department_id: '',
         role: 'employee',
         status: 'active',
@@ -184,13 +183,13 @@ export default function Users() {
       // Transform data to match backend expectations
       const department = departments.find(d => d.id === parseInt(formData.department_id));
       const updateData = {
-        name: formData.username,
+        name: formData.name,
         username: formData.username,
         email: formData.email,
         department: department?.name || '',
         department_id: formData.department_id,
         role: formData.role,
-        phone: formData.phone_number,
+        phone: formData.phone,
         status: formData.status,
         managed_department_ids: formData.managed_department_ids || []
       };
@@ -435,8 +434,8 @@ export default function Users() {
 
                 <h3 className="text-lg font-semibold text-black mb-1">{u.username}</h3>
                 <p className="text-sm text-gray-600 mb-1">{u.email}</p>
-                {u.phone_number && (
-                  <p className="text-sm text-gray-600 mb-3">{u.phone_number}</p>
+                {u.phone && (
+                  <p className="text-sm text-gray-600 mb-3">{u.phone}</p>
                 )}
 
                 <div className="space-y-2 mb-4">
@@ -543,8 +542,8 @@ export default function Users() {
                   </label>
                   <input
                     type="tel"
-                    value={formData.phone_number}
-                    onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="+1 (555) 123-4567"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
                   />
@@ -655,7 +654,7 @@ export default function Users() {
                       username: '',
                       email: '',
                       password: generateSecurePassword(),
-                      phone_number: '',
+                      phone: '',
                       department_id: '',
                       role: 'employee',
                       status: 'active',
@@ -727,8 +726,8 @@ export default function Users() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                 <input
                   type="tel"
-                  value={formData.phone_number}
-                  onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>

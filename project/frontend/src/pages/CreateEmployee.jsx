@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle, X } from 'lucide-react';
 import { authAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
 
 export default function CreateEmployee() {
   const { user } = useAuthStore();
   const [departments, setDepartments] = useState([]);
+  const [allDepartments, setAllDepartments] = useState([]); // For HOD multi-department selection
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
@@ -18,7 +19,8 @@ export default function CreateEmployee() {
     password: '',
     department: '',
     role: 'employee',
-    phone: ''
+    phone: '',
+    managed_department_ids: []
   });
   const [errors, setErrors] = useState({});
 
@@ -52,6 +54,11 @@ export default function CreateEmployee() {
     try {
       const response = await departmentAPI.getAllDepartments();
       let availableDepartments = response.data || [];
+      
+      // Store all departments for HOD multi-selection (admin only)
+      if (user?.role === 'super_admin') {
+        setAllDepartments(availableDepartments);
+      }
       
       // Filter departments for dept admins
       if (user?.role === 'dept_admin') {
@@ -113,6 +120,13 @@ export default function CreateEmployee() {
       newErrors.phone = 'Please enter a valid phone number';
     }
 
+    // Validate managed departments for HOD role
+    if (formData.role === 'dept_admin' && user?.role === 'super_admin') {
+      if (!formData.managed_department_ids || formData.managed_department_ids.length === 0) {
+        newErrors.managed_department_ids = 'Please select at least one department for the HOD to manage';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -132,6 +146,11 @@ export default function CreateEmployee() {
         submitData.department = departments[0].name;
       }
       
+      // Include managed_department_ids for HOD role
+      if (submitData.role === 'dept_admin' && submitData.managed_department_ids.length > 0) {
+        submitData.managed_department_ids = submitData.managed_department_ids.map(id => parseInt(id));
+      }
+      
       const response = await authAPI.adminCreateEmployee(submitData);
       
       if (response.data && response.data.data) {
@@ -141,7 +160,8 @@ export default function CreateEmployee() {
           username: response.data.data.username,
           department: formData.department,
           role: formData.role,
-          password: generatedPassword
+          password: generatedPassword,
+          managed_department_ids: formData.managed_department_ids
         });
         setShowSuccess(true);
         
@@ -153,7 +173,8 @@ export default function CreateEmployee() {
           password: '',
           department: '',
           role: 'employee',
-          phone: ''
+          phone: '',
+          managed_department_ids: []
         });
         generatePassword();
         setErrors({});
@@ -272,7 +293,18 @@ export default function CreateEmployee() {
                 <div className="text-gray-600">Department:</div>
                 <div className="font-medium">{createdEmployee.department}</div>
                 <div className="text-gray-600">Role:</div>
-                <div className="font-medium">{createdEmployee.role}</div>
+                <div className="font-medium capitalize">{createdEmployee.role === 'dept_admin' ? 'Head of Department' : createdEmployee.role}</div>
+                {createdEmployee.role === 'dept_admin' && createdEmployee.managed_department_ids?.length > 0 && (
+                  <>
+                    <div className="text-gray-600">Manages:</div>
+                    <div className="font-medium">
+                      {createdEmployee.managed_department_ids.map(id => {
+                        const dept = allDepartments.find(d => d.id === id);
+                        return dept?.name;
+                      }).filter(Boolean).join(', ')}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -507,7 +539,13 @@ export default function CreateEmployee() {
                   <select
                     name="role"
                     value={formData.role}
-                    onChange={handleChange}
+                    onChange={(e) => {
+                      handleChange(e);
+                      // Clear managed departments when role changes
+                      if (e.target.value !== 'dept_admin') {
+                        setFormData(prev => ({ ...prev, managed_department_ids: [] }));
+                      }
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="employee">Employee</option>
@@ -516,6 +554,81 @@ export default function CreateEmployee() {
                   </select>
                 )}
               </div>
+
+              {/* Managed Departments - Only show for HOD role */}
+              {user?.role === 'super_admin' && formData.role === 'dept_admin' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Managed Departments <span className="text-red-600">*</span>
+                  </label>
+                  <div className="border border-orange-300 rounded-lg bg-orange-50 p-3">
+                    <p className="text-xs text-orange-700 mb-2">
+                      Select departments this HOD will manage:
+                    </p>
+                    <div className="max-h-40 overflow-y-auto space-y-2">
+                      {allDepartments.map((dept) => (
+                        <label
+                          key={dept.id}
+                          className="flex items-center gap-2 p-2 bg-white rounded border border-orange-200 hover:bg-orange-100 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.managed_department_ids.includes(dept.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  managed_department_ids: [...prev.managed_department_ids, dept.id]
+                                }));
+                              } else {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  managed_department_ids: prev.managed_department_ids.filter(id => id !== dept.id)
+                                }));
+                              }
+                            }}
+                            className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
+                          />
+                          <span className="text-sm text-gray-700">{dept.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {formData.managed_department_ids.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-orange-200">
+                        <p className="text-xs text-orange-800 font-medium">
+                          Selected: {formData.managed_department_ids.length} department(s)
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {formData.managed_department_ids.map(id => {
+                            const dept = allDepartments.find(d => d.id === id);
+                            return dept ? (
+                              <span
+                                key={id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-200 text-orange-800 text-xs rounded-full"
+                              >
+                                {dept.name}
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({
+                                    ...prev,
+                                    managed_department_ids: prev.managed_department_ids.filter(did => did !== id)
+                                  }))}
+                                  className="hover:text-orange-900"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {errors.managed_department_ids && (
+                    <p className="text-red-600 text-sm mt-1">{errors.managed_department_ids}</p>
+                  )}
+                </div>
+              )}
 
               {/* Password */}
               <div>
@@ -574,7 +687,8 @@ export default function CreateEmployee() {
                   password: '',
                   department: '',
                   role: 'employee',
-                  phone: ''
+                  phone: '',
+                  managed_department_ids: []
                 });
                 generatePassword();
                 setErrors({});

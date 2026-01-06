@@ -561,17 +561,28 @@ export default function Schedule() {
           <select
             value={formData.department_id}
             onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-            className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${user?.role === 'dept_admin' ? 'bg-gray-100' : ''}`}
+            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
-            disabled={user?.role === 'dept_admin'}
           >
             <option value="">Select Department</option>
-            {departments.map(dept => (
-              <option key={dept.id} value={dept.id}>{dept.name}</option>
-            ))}
+            {user?.role === 'super_admin' 
+              ? departments.map(dept => (
+                  <option key={dept.id} value={dept.id}>{dept.name}</option>
+                ))
+              : departments
+                  .filter(dept => {
+                    const managedIds = (user?.managed_department_ids || [])
+                      .map(id => Number(id))
+                      .filter(id => Number.isFinite(id) && id > 0);
+                    return managedIds.includes(Number(dept.id)) || Number(dept.id) === Number(user?.department_id);
+                  })
+                  .map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.name}</option>
+                  ))
+            }
           </select>
           {user?.role === 'dept_admin' && (
-            <p className="text-xs text-gray-500 mt-1">Auto-selected based on your department</p>
+            <p className="text-xs text-gray-500 mt-1">Select from your managed departments</p>
           )}
         </div>
       )}
