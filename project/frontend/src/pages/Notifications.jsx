@@ -2,8 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Bell, Check, Trash2, CheckCheck, Trash, Filter, AlertCircle, CheckCircle, Info, Calendar, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import api from '../services/api';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 const Notifications = () => {
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [notifications, setNotifications] = useState([]);
   const [filteredNotifications, setFilteredNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -136,7 +140,7 @@ const Notifications = () => {
       ));
     } catch (error) {
       console.error('Error marking notification as read:', error);
-      alert('Failed to mark notification as read');
+      toast.error('Failed to mark notification as read');
     }
   };
 
@@ -148,21 +152,27 @@ const Notifications = () => {
       ));
     } catch (error) {
       console.error('Error marking notification as unread:', error);
-      alert('Failed to mark notification as unread');
+      toast.error('Failed to mark notification as unread');
     }
   };
 
   const handleDelete = async (notificationId) => {
-    if (!window.confirm('Are you sure you want to delete this notification?')) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      title: 'Delete Notification',
+      message: 'Are you sure you want to delete this notification?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await api.delete(`/notifications/${notificationId}`);
       setNotifications(notifications.filter(n => n.id !== notificationId));
+      toast.success('Notification deleted');
     } catch (error) {
       console.error('Error deleting notification:', error);
-      alert('Failed to delete notification');
+      toast.error('Failed to delete notification');
     }
   };
 
@@ -170,23 +180,30 @@ const Notifications = () => {
     try {
       await api.post('/notifications/read-all');
       setNotifications(notifications.map(n => ({ ...n, read_status: 1 })));
+      toast.success('All notifications marked as read');
     } catch (error) {
       console.error('Error marking all as read:', error);
-      alert('Failed to mark all notifications as read');
+      toast.error('Failed to mark all notifications as read');
     }
   };
 
   const handleDeleteAllRead = async () => {
-    if (!window.confirm('Are you sure you want to delete all read notifications?')) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      title: 'Delete Read Notifications',
+      message: 'Are you sure you want to delete all read notifications?',
+      confirmText: 'Delete All',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await api.delete('/notifications/clear-read');
       setNotifications(notifications.filter(n => n.read_status !== 1));
+      toast.success('Read notifications deleted');
     } catch (error) {
       console.error('Error deleting read notifications:', error);
-      alert('Failed to delete read notifications');
+      toast.error('Failed to delete read notifications');
     }
   };
 

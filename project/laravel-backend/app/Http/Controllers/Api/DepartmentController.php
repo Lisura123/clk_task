@@ -43,8 +43,8 @@ class DepartmentController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isSuperAdmin()) {
-            return response()->json(['message' => 'Only super admins can create departments'], 403);
+        if (!$user->isAdmin()) {
+            return response()->json(['message' => 'Only admins can create departments'], 403);
         }
 
         $validator = Validator::make($request->all(), [
@@ -56,7 +56,7 @@ class DepartmentController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $department = Department::create($request->all());
+        $department = Department::create($request->only(['name', 'description']));
 
         return response()->json([
             'message' => 'Department created successfully',
@@ -86,7 +86,7 @@ class DepartmentController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $department->update($request->all());
+        $department->update($request->only(['name', 'description']));
 
         return response()->json([
             'message' => 'Department updated successfully',
@@ -149,20 +149,12 @@ class DepartmentController extends Controller
         $department = Department::findOrFail($id);
 
         // Permission checks:
-        // - Super admins can view all departments
-        // - Dept admins can view employees of departments they manage or their own department
-        // - Employees can only view employees of their own department
-        
-        if ($user->isDeptAdmin()) {
-            $manages = $user->managesDepartment($department->name);
-            $sameDept = (int)$user->department_id === (int)$id;
-            if (!$manages && !$sameDept) {
-                return response()->json(['message' => 'Unauthorized: You do not manage this department'], 403);
-            }
-        }
+        // - Admins, Senior Employees, and HODs can view employees from ALL departments
+        //   (This enables cross-department task assignment)
+        // - Regular Employees can only view employees of their own department
 
-        // Employees can only view employees from their own department
-        if ($user->isEmployee()) {
+        // Regular employees (not senior, not hod) can only view employees from their own department
+        if ($user->isEmployee() && !$user->isSeniorEmployee() && !$user->isHod()) {
             if (!$user->department_id) {
                 return response()->json(['message' => 'Unauthorized: You are not assigned to any department'], 403);
             }
@@ -172,11 +164,11 @@ class DepartmentController extends Controller
         }
 
         // For Administration department, get all users (admins)
-        // For other departments, only get employees
+        // For other departments, get employees, senior employees and HODs (can be assigned tasks)
         if ($department->name === 'Administration') {
             $query = $department->users();
         } else {
-            $query = $department->users()->where('role', 'employee');
+            $query = $department->users()->whereIn('role', ['employee', 'senior_employee', 'hod']);
         }
 
         if ($request->has('status')) {

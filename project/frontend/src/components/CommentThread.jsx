@@ -2,15 +2,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Reply, Edit2, Trash2, Send, AtSign, Paperclip, MoreVertical, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import useAuthStore from '../store/authStore';
+import { useConfirm } from './ConfirmDialog';
 
 const CommentThread = ({ comment, onReply, onEdit, onDelete, participants, level = 0 }) => {
   const { user } = useAuthStore();
+  const confirmDialog = useConfirm();
   const [showActions, setShowActions] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(comment.comment);
 
   const isOwner = user?.id === comment.user_id;
-  const canEdit = isOwner || user?.role === 'super_admin';
+  const canEdit = isOwner || user?.role === 'admin';
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -144,8 +146,15 @@ const CommentThread = ({ comment, onReply, onEdit, onDelete, participants, level
                   <Edit2 className="w-4 h-4" /> Edit
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm('Delete this comment?')) {
+                  onClick={async () => {
+                    const confirmed = await confirmDialog({
+                      title: 'Delete Comment',
+                      message: 'Are you sure you want to delete this comment?',
+                      confirmText: 'Delete',
+                      cancelText: 'Cancel',
+                      type: 'danger'
+                    });
+                    if (confirmed) {
                       onDelete(comment.id);
                     }
                     setShowActions(false);

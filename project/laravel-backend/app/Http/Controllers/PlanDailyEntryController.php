@@ -134,17 +134,19 @@ class PlanDailyEntryController extends Controller
      */
     private function canAccessPlan($user, $plan)
     {
-        if ($user->role === 'admin') {
+        // Super admin can access all plans
+        if ($user->role === 'admin' || $user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedIds = is_array($user->managed_department_ids) 
                 ? $user->managed_department_ids 
                 : json_decode($user->managed_department_ids, true) ?? [];
             return in_array($plan->department_id, $managedIds);
         }
 
+        // Employees can view plans in their department
         return $user->department_id === $plan->department_id;
     }
 
@@ -153,11 +155,12 @@ class PlanDailyEntryController extends Controller
      */
     private function canManagePlan($user, $plan)
     {
-        if ($user->role === 'admin') {
+        // Super admin can manage all plans
+        if ($user->role === 'admin' || $user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedIds = is_array($user->managed_department_ids) 
                 ? $user->managed_department_ids 
                 : json_decode($user->managed_department_ids, true) ?? [];

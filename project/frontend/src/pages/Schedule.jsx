@@ -19,14 +19,24 @@ import {
   CheckSquare,
   Square,
   Loader2,
-  ArrowLeft
+  ArrowLeft,
+  Building2,
+  Activity,
+  CalendarDays,
+  Sparkles,
+  TrendingUp,
+  Users as UsersIcon
 } from 'lucide-react';
 import { scheduledPlanAPI, departmentAPI, planDailyEntryAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 export default function Schedule() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [searchParams] = useSearchParams();
   const initialDepartment = searchParams.get('department') || 'all';
   
@@ -70,7 +80,7 @@ export default function Schedule() {
     recurrence_end_date: ''
   });
 
-  const canManageSchedule = user?.role === 'super_admin' || user?.role === 'dept_admin';
+  const canManageSchedule = user?.role === 'admin' || user?.role === 'hod';
 
   useEffect(() => {
     fetchData();
@@ -158,7 +168,7 @@ export default function Schedule() {
     if (initialDepartment && initialDepartment !== 'all') {
       return initialDepartment;
     }
-    if (user?.role === 'dept_admin') {
+    if (user?.role === 'hod') {
       const managedIds = (user.managed_department_ids || [])
         .map(id => Number(id))
         .filter(id => Number.isFinite(id) && id > 0);
@@ -322,9 +332,10 @@ export default function Schedule() {
       await scheduledPlanAPI.create(submitData);
       setShowCreateModal(false);
       fetchData();
+      toast.success('Schedule created successfully');
     } catch (error) {
       console.error('Error creating plan:', error);
-      alert(error.response?.data?.message || 'Failed to create scheduled plan');
+      toast.error(error.response?.data?.message || 'Failed to create scheduled plan');
     }
   };
 
@@ -340,9 +351,10 @@ export default function Schedule() {
       setShowEditModal(false);
       setSelectedPlan(null);
       fetchData();
+      toast.success('Schedule updated successfully');
     } catch (error) {
       console.error('Error updating plan:', error);
-      alert(error.response?.data?.message || 'Failed to update scheduled plan');
+      toast.error(error.response?.data?.message || 'Failed to update scheduled plan');
     }
   };
 
@@ -399,9 +411,10 @@ export default function Schedule() {
       const response = await planDailyEntryAPI.update(planId, date, entryFormData);
       setDailyEntries(prev => ({ ...prev, [key]: response.data.entry }));
       cancelEditingEntry();
+      toast.success('Daily entry saved');
     } catch (error) {
       console.error('Error saving daily entry:', error);
-      alert(error.response?.data?.message || 'Failed to save daily entry');
+      toast.error(error.response?.data?.message || 'Failed to save daily entry');
     } finally {
       setLoadingEntries(prev => ({ ...prev, [key]: false }));
     }
@@ -458,15 +471,23 @@ export default function Schedule() {
   };
 
   const handleDelete = async (plan) => {
-    if (!confirm('Are you sure you want to delete this scheduled plan?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Schedule',
+      message: 'Are you sure you want to delete this scheduled plan?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await scheduledPlanAPI.delete(plan.id);
       setShowViewModal(false);
       setShowDayModal(false);
       fetchData();
+      toast.success('Schedule deleted successfully');
     } catch (error) {
       console.error('Error deleting plan:', error);
-      alert('Failed to delete scheduled plan');
+      toast.error('Failed to delete scheduled plan');
     }
   };
 
@@ -477,19 +498,25 @@ export default function Schedule() {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
-    const startingDay = firstDay.getDay();
+    // Convert Sunday=0 to Monday=0 format (Sri Lankan/ISO week)
+    // getDay() returns 0=Sun, 1=Mon, ..., 6=Sat
+    // We want 0=Mon, 1=Tue, ..., 6=Sun
+    const startingDay = (firstDay.getDay() + 6) % 7;
 
     const days = [];
     
+    // Add days from previous month
     for (let i = 0; i < startingDay; i++) {
       const prevDate = new Date(year, month, -startingDay + i + 1);
       days.push({ date: prevDate, isCurrentMonth: false });
     }
     
+    // Add days of current month
     for (let i = 1; i <= daysInMonth; i++) {
       days.push({ date: new Date(year, month, i), isCurrentMonth: true });
     }
     
+    // Add days from next month to fill the grid
     const remainingDays = 42 - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push({ date: new Date(year, month + 1, i), isCurrentMonth: false });
@@ -523,7 +550,8 @@ export default function Schedule() {
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                       'July', 'August', 'September', 'October', 'November', 'December'];
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  // Sri Lankan format: Week starts on Monday
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   const getPlanColor = (plan) => {
     if (plan.is_recurring) {
@@ -565,7 +593,7 @@ export default function Schedule() {
             required
           >
             <option value="">Select Department</option>
-            {user?.role === 'super_admin' 
+            {user?.role === 'admin' 
               ? departments.map(dept => (
                   <option key={dept.id} value={dept.id}>{dept.name}</option>
                 ))
@@ -581,7 +609,7 @@ export default function Schedule() {
                   ))
             }
           </select>
-          {user?.role === 'dept_admin' && (
+          {user?.role === 'hod' && (
             <p className="text-xs text-gray-500 mt-1">Select from your managed departments</p>
           )}
         </div>
@@ -1059,6 +1087,11 @@ export default function Schedule() {
                       
                       <p className="text-xs text-gray-500 mt-2">
                         {plan.department_name} • Created by {plan.creator_name}
+                        {plan.employee_count > 0 && (
+                          <span className="ml-2">
+                            • <UsersIcon className="w-3 h-3 inline" /> {plan.employee_count} employee{plan.employee_count !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </p>
                     </div>
                     
@@ -1116,55 +1149,100 @@ export default function Schedule() {
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="flex items-center gap-4">
-          {isDepartmentPreSelected && (
+    <div className="min-h-screen">
+      {/* Modern Header with Gradient - Updated Jan 16 2026 */}
+      <div className="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 rounded-2xl p-6 mb-6 text-white shadow-lg">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div className="flex items-center gap-4">
+            {isDepartmentPreSelected && (
+              <button
+                onClick={() => navigate(`/dashboard/departments/${initialDepartment}`)}
+                className="flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors backdrop-blur-sm"
+              >
+                <ArrowLeft className="w-5 h-5" />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+            )}
+            <div>
+              <h1 className="text-3xl font-bold flex items-center gap-3">
+                <CalendarDays className="w-8 h-8" />
+                Schedule
+              </h1>
+              <p className="text-blue-100 mt-1">
+                {isDepartmentPreSelected 
+                  ? `Schedules for ${departments.find(d => String(d.id) === String(initialDepartment))?.name || 'Department'}`
+                  : 'Plan and manage department schedules'
+                }
+              </p>
+            </div>
+          </div>
+          
+          {/* Stats Cards */}
+          <div className="flex flex-wrap gap-3">
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <CalendarIcon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{plans.length}</p>
+                <p className="text-xs text-blue-100">Total Plans</p>
+              </div>
+            </div>
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <Repeat className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{plans.filter(p => p.is_recurring).length}</p>
+                <p className="text-xs text-blue-100">Recurring</p>
+              </div>
+            </div>
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{departments.length}</p>
+                <p className="text-xs text-blue-100">Departments</p>
+              </div>
+            </div>
+          </div>
+          
+          {canManageSchedule && (
             <button
-              onClick={() => navigate(`/dashboard/departments/${initialDepartment}`)}
-              className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              onClick={() => handleOpenCreateModal()}
+              className="flex items-center gap-2 px-5 py-3 bg-white text-blue-600 rounded-xl hover:bg-blue-50 transition-all shadow-lg hover:shadow-xl font-semibold"
             >
-              <ArrowLeft className="w-5 h-5" />
-              <span className="hidden sm:inline">Back to Department</span>
+              <Plus className="w-5 h-5" />
+              New Plan
             </button>
           )}
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Schedule</h1>
-            <p className="text-gray-600 mt-1">
-              {isDepartmentPreSelected 
-                ? `Schedules for ${departments.find(d => String(d.id) === String(initialDepartment))?.name || 'Department'}`
-                : 'Plan and manage department schedules'
-              }
-            </p>
-          </div>
         </div>
-        {canManageSchedule && (
-          <button
-            onClick={() => handleOpenCreateModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            <Plus className="w-5 h-5" />
-            New Plan
-          </button>
-        )}
       </div>
 
       {/* Filters & View Toggle */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex flex-wrap items-center gap-4">
           {/* View Toggle */}
-          <div className="flex items-center border rounded-lg overflow-hidden">
+          <div className="flex items-center bg-gray-100 rounded-xl p-1">
             <button
               onClick={() => setViewMode('calendar')}
-              className={`flex items-center gap-1 px-4 py-2 transition-colors ${viewMode === 'calendar' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                viewMode === 'calendar' 
+                  ? 'bg-white text-blue-600 shadow-sm font-medium' 
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
               <Grid3X3 className="w-4 h-4" />
               Calendar
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`flex items-center gap-1 px-4 py-2 transition-colors ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                viewMode === 'list' 
+                  ? 'bg-white text-blue-600 shadow-sm font-medium' 
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             >
               <List className="w-4 h-4" />
               List
@@ -1174,21 +1252,22 @@ export default function Schedule() {
           {/* Today Button */}
           <button
             onClick={goToToday}
-            className="px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors font-medium"
           >
+            <Sparkles className="w-4 h-4" />
             Today
           </button>
 
           {/* Department Filter - hidden when pre-selected from URL */}
-          {!isDepartmentPreSelected && (user?.role === 'super_admin' || (user?.managed_department_ids?.length > 1)) && (
+          {!isDepartmentPreSelected && (user?.role === 'admin' || (user?.managed_department_ids?.length > 1)) && (
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              className={`px-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                user?.role === 'dept_admin' ? 'border-orange-300 bg-orange-50' : ''
+              className={`px-4 py-2.5 border-2 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium ${
+                user?.role === 'hod' ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-gray-200 bg-white'
               }`}
             >
-              {user?.role === 'dept_admin' ? (
+              {user?.role === 'hod' ? (
                 // For HODs, show "All My Departments" and only their managed departments
                 <>
                   <option value="all">All My Departments</option>
@@ -1205,7 +1284,7 @@ export default function Schedule() {
                   }
                 </>
               ) : (
-                // For super_admin, show all departments
+                // For admin, show all departments
                 <>
                   <option value="all">All Departments</option>
                   {departments.map(d => (
@@ -1223,59 +1302,67 @@ export default function Schedule() {
           )}
 
           {/* Legend */}
-          <div className="ml-auto flex items-center gap-4 text-sm text-gray-600">
-            <span className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded bg-blue-100 border border-blue-200"></div>
-              Regular
+          <div className="ml-auto flex items-center gap-4 text-sm">
+            <span className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-lg">
+              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+              <span className="text-blue-700 font-medium">Regular</span>
             </span>
-            <span className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded bg-purple-100 border border-purple-200"></div>
-              Recurring
+            <span className="flex items-center gap-2 bg-purple-50 px-3 py-1.5 rounded-lg">
+              <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+              <span className="text-purple-700 font-medium">Recurring</span>
             </span>
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="flex flex-col items-center justify-center h-64 bg-white rounded-xl border border-gray-100">
+          <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+          </div>
+          <p className="text-gray-500">Loading schedule...</p>
         </div>
       ) : viewMode === 'calendar' ? (
         /* Calendar View */
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           {/* Multi-day Selection Tip */}
           {canManageSchedule && (
-            <div className="px-4 py-2 bg-gradient-to-r from-blue-50 to-purple-50 border-b border-gray-200 flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-blue-600" />
+            <div className="px-4 py-3 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-b border-gray-100 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-blue-600" />
+              </div>
               <span className="text-sm text-gray-600">
-                <span className="font-medium text-blue-700">Tip:</span> Click and drag across multiple days to create a plan spanning those dates
+                <span className="font-semibold text-blue-700">Pro Tip:</span> Click and drag across multiple days to create a plan spanning those dates
               </span>
             </div>
           )}
           
           {/* Calendar Header */}
-          <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+          <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-gray-50 to-gray-100">
             <button
               onClick={() => navigateMonth(-1)}
-              className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              className="p-2.5 hover:bg-white hover:shadow-sm rounded-xl transition-all"
             >
-              <ChevronLeft className="w-5 h-5" />
+              <ChevronLeft className="w-5 h-5 text-gray-700" />
             </button>
-            <h2 className="text-xl font-semibold text-gray-900">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-blue-600" />
               {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
             </h2>
             <button
               onClick={() => navigateMonth(1)}
-              className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              className="p-2.5 hover:bg-white hover:shadow-sm rounded-xl transition-all"
             >
-              <ChevronRight className="w-5 h-5" />
+              <ChevronRight className="w-5 h-5 text-gray-700" />
             </button>
           </div>
 
           {/* Day Names */}
-          <div className="grid grid-cols-7 border-b bg-gray-50">
-            {dayNames.map(day => (
-              <div key={day} className="py-3 text-center text-sm font-semibold text-gray-600 border-r last:border-r-0">
+          <div className="grid grid-cols-7 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+            {dayNames.map((day, idx) => (
+              <div key={day} className={`py-3 text-center text-sm font-bold border-r last:border-r-0 ${
+                idx === 5 || idx === 6 ? 'text-blue-600' : 'text-gray-700'
+              }`}>
                 {day}
               </div>
             ))}
@@ -1360,7 +1447,7 @@ export default function Schedule() {
                       );
                     })}
                     {dayPlans.length > 3 && (
-                      <div className="text-xs text-blue-600 font-semibold px-1 bg-blue-50 rounded py-0.5 text-center">
+                      <div className="text-xs text-blue-600 font-semibold px-2 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg text-center shadow-sm">
                         +{dayPlans.length - 3} more
                       </div>
                     )}
@@ -1372,17 +1459,24 @@ export default function Schedule() {
 
           {/* Selection Info Bar */}
           {selectedDates.length > 1 && (
-            <div className="p-3 bg-blue-50 border-t border-blue-200 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CalendarIcon className="w-5 h-5 text-blue-600" />
-                <span className="text-sm text-blue-800 font-medium">
-                  {selectedDates.length} days selected ({selectedDates.sort()[0]} to {selectedDates.sort()[selectedDates.length - 1]})
-                </span>
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-blue-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                  <CalendarDays className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <span className="text-sm font-semibold text-blue-800">
+                    {selectedDates.length} days selected
+                  </span>
+                  <p className="text-xs text-blue-600">
+                    {selectedDates.sort()[0]} to {selectedDates.sort()[selectedDates.length - 1]}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={clearSelection}
-                  className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-white hover:shadow-sm rounded-lg transition-all font-medium"
                 >
                   Cancel
                 </button>
@@ -1391,7 +1485,7 @@ export default function Schedule() {
                     const sortedDates = [...selectedDates].sort();
                     handleOpenCreateModal(sortedDates[0], sortedDates[sortedDates.length - 1]);
                   }}
-                  className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-lg font-medium"
                 >
                   <Plus className="w-4 h-4" />
                   Create Plan for {selectedDates.length} Days
@@ -1402,30 +1496,33 @@ export default function Schedule() {
         </div>
       ) : (
         /* List View */
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           {plans.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-              <CalendarIcon className="w-16 h-16 mb-4 opacity-50" />
-              <p className="text-lg font-medium">No scheduled plans found</p>
-              <p className="text-sm text-gray-400 mb-4">Plans for {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}</p>
+            <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center mb-6">
+                <CalendarIcon className="w-10 h-10 text-blue-500" />
+              </div>
+              <p className="text-xl font-semibold text-gray-700">No scheduled plans found</p>
+              <p className="text-sm text-gray-400 mb-6">Plans for {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}</p>
               {canManageSchedule && (
                 <button
                   onClick={() => handleOpenCreateModal()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg font-medium"
                 >
+                  <Plus className="w-5 h-5" />
                   Create your first plan
                 </button>
               )}
             </div>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y divide-gray-100">
               {plans.map(plan => {
                 const isMultiDay = plan.end_date && plan.start_date !== plan.end_date;
                 
                 return (
                   <div 
                     key={plan.id} 
-                    className="p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+                    className="p-4 hover:bg-gray-50 transition-all cursor-pointer group"
                     onClick={() => handleView(plan)}
                   >
                     <div className="flex items-start justify-between">
@@ -1592,6 +1689,44 @@ export default function Schedule() {
                     <h4 className="font-medium text-green-800">Notes / Updates</h4>
                   </div>
                   <p className="text-green-700 text-sm whitespace-pre-wrap">{selectedPlan.notes}</p>
+                </div>
+              )}
+
+              {/* Related Employees Section */}
+              {selectedPlan.employees && selectedPlan.employees.length > 0 && (
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-3">
+                    <UsersIcon className="w-4 h-4 text-blue-600" />
+                    <h4 className="font-medium text-blue-800">
+                      Related Employees ({selectedPlan.employee_count || selectedPlan.employees.length})
+                    </h4>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedPlan.employees.slice(0, 8).map((employee) => (
+                      <div 
+                        key={employee.id} 
+                        className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-full border border-blue-100"
+                      >
+                        {employee.profile_picture ? (
+                          <img 
+                            src={employee.profile_picture} 
+                            alt={employee.name}
+                            className="w-6 h-6 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-blue-200 flex items-center justify-center text-xs font-medium text-blue-700">
+                            {employee.name?.charAt(0)?.toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-sm text-gray-700">{employee.name}</span>
+                      </div>
+                    ))}
+                    {selectedPlan.employees.length > 8 && (
+                      <div className="flex items-center gap-1 bg-gray-100 px-3 py-1.5 rounded-full text-sm text-gray-600">
+                        +{selectedPlan.employees.length - 8} more
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

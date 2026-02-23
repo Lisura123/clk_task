@@ -25,6 +25,7 @@ class Task extends Model
         'is_archived',
         'archived_at',
         'completed_at',
+        'parent_task_id',
     ];
 
     protected $casts = [
@@ -36,7 +37,7 @@ class Task extends Model
         'completed_at' => 'datetime',
     ];
 
-    protected $appends = ['assigned_to_name', 'created_by_name'];
+    protected $appends = ['assigned_to_name', 'created_by_name', 'subtasks_count', 'completed_subtasks_count'];
 
     /**
      * Get the assigned user's name
@@ -52,6 +53,38 @@ class Task extends Model
     public function getCreatedByNameAttribute()
     {
         return $this->createdBy?->username ?? $this->createdBy?->name;
+    }
+
+    /**
+     * Get the count of subtasks
+     */
+    public function getSubtasksCountAttribute()
+    {
+        return $this->subtasks()->count();
+    }
+
+    /**
+     * Get the count of completed subtasks
+     */
+    public function getCompletedSubtasksCountAttribute()
+    {
+        return $this->subtasks()->where('status', 'completed')->count();
+    }
+
+    /**
+     * Get the parent task
+     */
+    public function parentTask(): BelongsTo
+    {
+        return $this->belongsTo(Task::class, 'parent_task_id');
+    }
+
+    /**
+     * Get sub-tasks for this task
+     */
+    public function subtasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'parent_task_id');
     }
 
     /**

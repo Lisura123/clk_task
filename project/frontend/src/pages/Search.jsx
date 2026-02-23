@@ -25,8 +25,8 @@ export default function Search() {
   const debounceRef = useRef(null);
 
   const isEmployee = user?.role === 'employee';
-  const isHOD = user?.role === 'dept_admin';
-  const isAdmin = user?.role === 'super_admin';
+  const isHOD = user?.role === 'hod';
+  const isAdmin = user?.role === 'admin';
 
   // Get managed department IDs for HOD
   const getManagedDeptIds = () => {
@@ -142,13 +142,15 @@ export default function Search() {
       ).slice(0, 5);
       
       matchingUsers.forEach(usr => {
-        const isUserHOD = usr.role === 'dept_admin';
+        const isUserHOD = usr.role === 'hod';
+        const isSeniorEmployee = usr.role === 'senior_employee';
+        const roleType = isUserHOD ? 'hod' : (isSeniorEmployee ? 'senior' : 'employee');
         newSuggestions.push({
-          type: isUserHOD ? 'hod' : 'employee',
+          type: roleType,
           id: usr.id,
           title: usr.name || usr.username,
           subtitle: `${usr.email} • ${usr.department || usr.department_name || 'No department'}`,
-          icon: isUserHOD ? 'hod' : 'user',
+          icon: isUserHOD ? 'hod' : (isSeniorEmployee ? 'senior' : 'user'),
           data: usr
         });
       });
@@ -200,8 +202,10 @@ export default function Search() {
         navigate(`/dashboard/tasks/${suggestion.id}`);
         break;
       case 'employee':
+      case 'senior':
       case 'hod':
-        navigate(`/dashboard/users`);
+        // Navigate to employee details page
+        navigate(`/dashboard/employees/${suggestion.id}`);
         break;
       case 'department':
         navigate(`/dashboard/departments/${suggestion.id}`);
@@ -251,7 +255,7 @@ export default function Search() {
         
         users = filteredUsers.filter(u => u.role === 'employee');
         if (isAdmin) {
-          hods = filteredUsers.filter(u => u.role === 'dept_admin');
+          hods = filteredUsers.filter(u => u.role === 'hod');
         }
       }
 
@@ -329,11 +333,11 @@ export default function Search() {
   return (
     <div>
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-black">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-black">
           {isEmployee ? 'Search My Tasks' : isHOD ? 'Department Search' : 'Global Search'}
         </h1>
-        <p className="text-gray-600 mt-1">
+        <p className="text-sm sm:text-base text-gray-600 mt-1">
           {isEmployee 
             ? 'Search your assigned tasks' 
             : isHOD 
@@ -344,11 +348,11 @@ export default function Search() {
       </div>
 
       {/* Search Form */}
-      <div className="bg-white rounded-lg shadow-sm p-6 mb-6 border border-gray-200">
-        <form onSubmit={handleSearch} className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4">
+      <div className="bg-white rounded-lg shadow-sm p-4 sm:p-6 mb-4 sm:mb-6 border border-gray-200">
+        <form onSubmit={handleSearch} className="space-y-3 sm:space-y-4">
+          <div className="flex flex-col gap-3 sm:gap-4">
             <div className="flex-1 relative">
-              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
+              <SearchIcon className="absolute left-2.5 sm:left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-gray-400 z-10" />
               <input
                 ref={inputRef}
                 type="text"
@@ -362,7 +366,7 @@ export default function Search() {
                 value={searchTerm}
                 onChange={handleSearchChange}
                 onFocus={() => searchTerm.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
-                className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-lg"
+                className="w-full pl-8 sm:pl-10 pr-10 py-2.5 sm:py-3 text-sm sm:text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
               />
               {searchTerm && (
                 <button
@@ -372,9 +376,9 @@ export default function Search() {
                     setSuggestions([]);
                     setShowSuggestions(false);
                   }}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+                  className="absolute right-2.5 sm:right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10 p-1"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               )}
               
@@ -431,7 +435,7 @@ export default function Search() {
                 <select
                   value={searchType}
                   onChange={(e) => setSearchType(e.target.value)}
-                  className="px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white flex-1 sm:flex-initial"
                 >
                   {getSearchTypeOptions().map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -440,7 +444,7 @@ export default function Search() {
               )}
               <button
                 type="submit"
-                className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+                className="px-4 sm:px-6 py-2.5 sm:py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium text-sm sm:text-base flex-1 sm:flex-initial active:scale-95"
               >
                 Search
               </button>
@@ -452,15 +456,15 @@ export default function Search() {
       {/* Loading State */}
       {loading && (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+          <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-red-600"></div>
         </div>
       )}
 
       {/* Results */}
       {!loading && searched && (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {/* Result Summary */}
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600">
             <span>Found: {getTotalResults()} results</span>
             {results.tasks.length > 0 && <span>• {results.tasks.length} tasks</span>}
             {results.users.length > 0 && <span>• {results.users.length} employees</span>}
@@ -509,7 +513,7 @@ export default function Search() {
                 {results.hods.map((hod) => (
                   <div 
                     key={hod.id} 
-                    onClick={() => navigate('/dashboard/users')}
+                    onClick={() => navigate(`/dashboard/employees/${hod.id}`)}
                     className="p-4 bg-orange-50 rounded-lg hover:bg-orange-100 hover:shadow-md transition-all cursor-pointer border border-orange-100"
                   >
                     <div className="flex items-center gap-3">
@@ -542,7 +546,7 @@ export default function Search() {
                 {results.users.map((usr) => (
                   <div 
                     key={usr.id} 
-                    onClick={() => navigate('/dashboard/users')}
+                    onClick={() => navigate(`/dashboard/employees/${usr.id}`)}
                     className="p-4 bg-green-50 rounded-lg hover:bg-green-100 hover:shadow-md transition-all cursor-pointer border border-green-100"
                   >
                     <div className="flex items-center gap-3">

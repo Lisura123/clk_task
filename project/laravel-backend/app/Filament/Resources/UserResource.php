@@ -57,8 +57,8 @@ class UserResource extends Resource
                         Forms\Components\Select::make('role')
                             ->required()
                             ->options([
-                                'super_admin' => 'Super Admin',
-                                'dept_admin' => 'Department Admin',
+                                'admin' => 'Super Admin',
+                                'hod' => 'Department Admin',
                                 'employee' => 'Employee',
                             ])
                             ->live()
@@ -84,7 +84,7 @@ class UserResource extends Resource
                             })
                             ->searchable()
                             ->preload()
-                            ->visible(fn (Forms\Get $get) => $get('role') === 'dept_admin')
+                            ->visible(fn (Forms\Get $get) => $get('role') === 'hod')
                             ->helperText('Select all departments this admin can manage'),
                         Forms\Components\Select::make('status')
                             ->required()
@@ -131,8 +131,8 @@ class UserResource extends Resource
                 Tables\Columns\TextColumn::make('role')
                     ->badge()
                     ->colors([
-                        'danger' => 'super_admin',
-                        'warning' => 'dept_admin',
+                        'danger' => 'admin',
+                        'warning' => 'hod',
                         'success' => 'employee',
                     ])
                     ->sortable(),
@@ -163,8 +163,8 @@ class UserResource extends Resource
             ->filters([
                 Tables\Filters\SelectFilter::make('role')
                     ->options([
-                        'super_admin' => 'Super Admin',
-                        'dept_admin' => 'Department Admin',
+                        'admin' => 'Super Admin',
+                        'hod' => 'Department Admin',
                         'employee' => 'Employee',
                     ]),
                 Tables\Filters\SelectFilter::make('status')

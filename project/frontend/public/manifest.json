@@ -1,0 +1,46 @@
+{
+  "name": "CameraLK Task Management System",
+  "short_name": "CameraLK Tasks",
+  "description": "Professional task management system for CameraLK team collaboration",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"],
+  "shortcuts": [
+    {
+      "name": "My Tasks",
+      "short_name": "Tasks",
+      "description": "View your assigned tasks",
+      "url": "/dashboard/tasks",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "View dashboard overview",
+      "url": "/dashboard",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Notifications",
+      "short_name": "Alerts",
+      "description": "Check notifications",
+      "url": "/dashboard/notifications",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

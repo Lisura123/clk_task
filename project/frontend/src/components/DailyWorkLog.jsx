@@ -13,9 +13,13 @@ import {
 } from 'lucide-react';
 import { workLogAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 export default function DailyWorkLog({ task, onClose, onUpdate }) {
   const { user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -29,7 +33,7 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
     blockers: ''
   });
 
-  // Only the assigned employee can add work logs - dept_admin and super_admin can only view
+  // Only the assigned employee can add work logs - admin and hod can only view
   const canAddLog = task?.assigned_to_id === user?.id;
 
   useEffect(() => {
@@ -63,7 +67,7 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
       if (onUpdate) onUpdate();
     } catch (error) {
       console.error('Error saving work log:', error);
-      alert(error.response?.data?.message || 'Failed to save work log');
+      toast.error(error.response?.data?.message || 'Failed to save work log');
     }
   };
 
@@ -81,13 +85,21 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
   };
 
   const handleDelete = async (logId) => {
-    if (!confirm('Are you sure you want to delete this work log?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Work Log',
+      message: 'Are you sure you want to delete this work log?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await workLogAPI.delete(task.id, logId);
       fetchLogs();
+      toast.success('Work log deleted');
     } catch (error) {
       console.error('Error deleting work log:', error);
-      alert('Failed to delete work log');
+      toast.error('Failed to delete work log');
     }
   };
 

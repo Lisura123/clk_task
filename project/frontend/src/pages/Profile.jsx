@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Phone, Building2, Shield, Calendar, Edit2, Save, X, Lock, Eye, EyeOff, CheckCircle, Clock, AlertCircle, BarChart3, Users } from 'lucide-react';
+import { User, Mail, Phone, Building2, Shield, Calendar, Edit2, Save, X, Lock, Eye, EyeOff, CheckCircle, Clock, AlertCircle, BarChart3, Users, Play, RotateCcw, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 import useAuthStore from '../store/authStore';
 import api, { authAPI, userAPI } from '../services/api';
+import { useToast } from '../components/Toast';
 
 const Profile = () => {
-  const { user: currentUser, setUser } = useAuthStore();
+  const { user: currentUser, setUser, updateUser } = useAuthStore();
+  const toast = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [restartingTour, setRestartingTour] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -62,7 +65,7 @@ const Profile = () => {
   const fetchUserStats = async () => {
     try {
       // For Super Admin, fetch system-wide stats
-      if (currentUser.role === 'super_admin') {
+      if (currentUser.role === 'admin') {
         const [tasksRes, usersRes, deptsRes] = await Promise.all([
           api.get('/tasks'),
           api.get('/users'),
@@ -93,9 +96,9 @@ const Profile = () => {
           totalUsers: users.length,
           totalDepartments: departments.length
         });
-      } else if (currentUser.role === 'dept_admin') {
+      } else if (currentUser.role === 'hod') {
         // For Department Admins, fetch department-wide stats
-        // The /tasks endpoint already filters by managed departments for dept_admin
+        // The /tasks endpoint already filters by managed departments for hod
         const [tasksRes, usersRes] = await Promise.all([
           api.get('/tasks'),
           api.get('/users')
@@ -205,10 +208,10 @@ const Profile = () => {
         }
       }
       setIsEditing(false);
-      alert('Profile updated successfully');
+      toast.success('Profile updated successfully');
     } catch (error) {
       console.error('Error updating profile:', error);
-      alert(error.response?.data?.message || 'Failed to update profile');
+      toast.error(error.response?.data?.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -218,12 +221,12 @@ const Profile = () => {
     e.preventDefault();
 
     if (passwordData.newPassword !== passwordData.confirmPassword) {
-      alert('New passwords do not match');
+      toast.warning('New passwords do not match');
       return;
     }
 
     if (passwordData.newPassword.length < 6) {
-      alert('Password must be at least 6 characters long');
+      toast.warning('Password must be at least 6 characters long');
       return;
     }
 
@@ -237,10 +240,10 @@ const Profile = () => {
       });
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setIsChangingPassword(false);
-      alert('Password changed successfully');
+      toast.success('Password changed successfully');
     } catch (error) {
       console.error('Error changing password:', error);
-      alert(error.response?.data?.message || 'Failed to change password');
+      toast.error(error.response?.data?.message || 'Failed to change password');
     } finally {
       setLoading(false);
     }
@@ -253,6 +256,25 @@ const Profile = () => {
       phone: currentUser.phone || ''
     });
     setIsEditing(false);
+  };
+
+  const handleRestartTour = async () => {
+    setRestartingTour(true);
+    try {
+      await api.post('/users/onboarding-reset');
+      updateUser({ onboarding_completed: false });
+      localStorage.removeItem('onboarding_completed');
+      toast.success('Tour reset! Refresh the page to start the onboarding guide.');
+      // Optional: auto-refresh after a short delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (error) {
+      console.error('Error resetting tour:', error);
+      toast.error('Failed to reset tour');
+    } finally {
+      setRestartingTour(false);
+    }
   };
 
   const cancelPasswordChange = () => {
@@ -273,24 +295,24 @@ const Profile = () => {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
-          {currentUser.role === 'super_admin' 
+          {currentUser.role === 'admin' 
             ? 'System Overview' 
-            : currentUser.role === 'dept_admin' 
+            : currentUser.role === 'hod' 
               ? 'Department Overview' 
               : 'My Profile'}
         </h1>
         <p className="text-gray-600 mt-1">
-          {currentUser.role === 'super_admin' 
+          {currentUser.role === 'admin' 
             ? 'System-wide statistics and account information'
-            : currentUser.role === 'dept_admin'
+            : currentUser.role === 'hod'
               ? 'Department-wide statistics and account information'
               : 'View and manage your account information'}
         </p>
       </div>
 
       {/* Statistics Cards */}
-      <div className={`grid grid-cols-1 md:grid-cols-2 ${currentUser.role === 'super_admin' ? 'lg:grid-cols-4' : currentUser.role === 'dept_admin' ? 'lg:grid-cols-3' : 'lg:grid-cols-6'} gap-4`}>
-        {currentUser.role === 'super_admin' && (
+      <div className={`grid grid-cols-1 md:grid-cols-2 ${currentUser.role === 'admin' ? 'lg:grid-cols-4' : currentUser.role === 'hod' ? 'lg:grid-cols-3' : 'lg:grid-cols-6'} gap-4`}>
+        {currentUser.role === 'admin' && (
           <>
             <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
               <div className="flex items-center justify-between">
@@ -314,7 +336,7 @@ const Profile = () => {
           </>
         )}
 
-        {currentUser.role === 'dept_admin' && (
+        {currentUser.role === 'hod' && (
           <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
             <div className="flex items-center justify-between">
               <div>
@@ -478,6 +500,24 @@ const Profile = () => {
                   />
                 </div>
 
+                {/* Showroom (Read-only) - Only shown if user has branches */}
+                {currentUser.branches && currentUser.branches.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4" />
+                        Showroom
+                      </div>
+                    </label>
+                    <input
+                      type="text"
+                      value={currentUser.branches.map(b => b.name).join(', ')}
+                      disabled
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                    />
+                  </div>
+                )}
+
                 {/* Role (Read-only) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -488,7 +528,7 @@ const Profile = () => {
                   </label>
                   <input
                     type="text"
-                    value={currentUser.role === 'super_admin' ? 'ADMIN' : currentUser.role === 'dept_admin' ? 'HEAD OF DEPARTMENT (HOD)' : 'EMPLOYEE'}
+                    value={currentUser.role === 'admin' ? 'ADMIN' : currentUser.role === 'hod' ? 'HEAD OF DEPARTMENT (HOD)' : currentUser.role === 'senior_employee' ? 'SENIOR EMPLOYEE' : 'EMPLOYEE'}
                     disabled
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
                   />
@@ -651,6 +691,31 @@ const Profile = () => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+
+        {/* Onboarding Tour Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Play className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Onboarding Tour</h2>
+                <p className="text-sm text-gray-500">
+                  Need a refresher? Restart the guided tour to learn about system features.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleRestartTour}
+              disabled={restartingTour}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              <RotateCcw className={`w-4 h-4 ${restartingTour ? 'animate-spin' : ''}`} />
+              {restartingTour ? 'Resetting...' : 'Restart Tour'}
+            </button>
           </div>
         </div>
       </div>

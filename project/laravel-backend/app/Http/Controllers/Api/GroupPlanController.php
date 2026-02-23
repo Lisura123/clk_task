@@ -44,9 +44,9 @@ class GroupPlanController extends Controller
 
         $query = GroupPlan::with(['group:id,name,department_id', 'creator:id,name,email']);
 
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             // Super admin can see all plans
-        } elseif ($user->role === 'dept_admin') {
+        } elseif ($user->role === 'hod') {
             // Dept admin can see plans from groups they created or belong to
             $groupIds = Group::where('created_by', $user->id)
                 ->orWhereHas('members', function ($q) use ($user) {
@@ -187,11 +187,11 @@ class GroupPlanController extends Controller
      */
     private function canAccessGroup($user, Group $group): bool
     {
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             // Dept admin can access groups they created or belong to
             if ($group->created_by === $user->id) {
                 return true;
@@ -212,11 +212,11 @@ class GroupPlanController extends Controller
      */
     private function canManageGroupPlans($user, Group $group): bool
     {
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             // Dept admin can manage plans in groups they created
             if ($group->created_by === $user->id) {
                 return true;

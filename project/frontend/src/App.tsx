@@ -1,5 +1,7 @@
-// Cache Buster: v2025.12.31.2
+// Cache Buster: v2026.02.09.1
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './components/ConfirmDialog';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -23,6 +25,15 @@ import Search from './pages/Search';
 import Notifications from './pages/Notifications';
 import Profile from './pages/Profile';
 import TaskDetails from './pages/TaskDetails';
+import EmployeeDetails from './pages/EmployeeDetails';
+import MyLeaves from './pages/MyLeaves';
+import LeaveApproval from './pages/LeaveApproval';
+import LeaveSettings from './pages/LeaveSettings';
+import Attendance from './pages/Attendance';
+import GpsAttendance from './pages/GpsAttendance';
+import BranchManagement from './pages/BranchManagement';
+import AttendanceReports from './pages/AttendanceReports';
+import AttendanceAdmin from './pages/AttendanceAdmin';
 import useAuthStore from './store/authStore';
 
 function DashboardRouter() {
@@ -31,10 +42,12 @@ function DashboardRouter() {
   if (!user) return <Navigate to="/login" replace />;
 
   switch (user.role) {
-    case 'super_admin':
+    case 'admin':
       return <SuperAdminDashboard />;
-    case 'dept_admin':
+    case 'hod':
       return <DeptAdminDashboard />;
+    case 'senior_employee':
+      return <EmployeeDashboard />;
     case 'employee':
       return <EmployeeDashboard />;
     default:
@@ -44,12 +57,14 @@ function DashboardRouter() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+    <ToastProvider>
+      <ConfirmProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
         
         <Route
           path="/"
@@ -68,7 +83,7 @@ function App() {
           <Route
             path="dashboard/tasks"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Tasks />
               </ProtectedRoute>
             }
@@ -76,7 +91,7 @@ function App() {
           <Route
             path="dashboard/tasks/:id"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <TaskDetails />
               </ProtectedRoute>
             }
@@ -84,7 +99,7 @@ function App() {
           <Route
             path="dashboard/my-tasks"
             element={
-              <ProtectedRoute allowedRoles={['employee']}>
+              <ProtectedRoute allowedRoles={['senior_employee', 'employee']}>
                 <MyTasks />
               </ProtectedRoute>
             }
@@ -94,15 +109,31 @@ function App() {
           <Route
             path="dashboard/users"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod']}>
                 <Users />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="dashboard/all-employees"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <Users />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="dashboard/employees/:id"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <EmployeeDetails />
               </ProtectedRoute>
             }
           />
           <Route
             path="dashboard/create-employee"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod']}>
                 <CreateEmployee />
               </ProtectedRoute>
             }
@@ -110,7 +141,7 @@ function App() {
           <Route
             path="dashboard/pending-registrations"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod']}>
                 <PendingRegistrations />
               </ProtectedRoute>
             }
@@ -120,7 +151,7 @@ function App() {
           <Route
             path="dashboard/departments"
             element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <Departments />
               </ProtectedRoute>
             }
@@ -128,17 +159,17 @@ function App() {
           <Route
             path="dashboard/departments/:id"
             element={
-              <ProtectedRoute allowedRoles={['super_admin']}>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <DepartmentDetails />
               </ProtectedRoute>
             }
           />
 
-          {/* Dashboard Group Management */}
+          {/* Dashboard Group Management - All users can view, admins can create */}
           <Route
             path="dashboard/groups"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Groups />
               </ProtectedRoute>
             }
@@ -148,7 +179,7 @@ function App() {
           <Route
             path="dashboard/schedule"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Schedule />
               </ProtectedRoute>
             }
@@ -158,7 +189,7 @@ function App() {
           <Route
             path="dashboard/search"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Search />
               </ProtectedRoute>
             }
@@ -168,7 +199,7 @@ function App() {
           <Route
             path="dashboard/notifications"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Notifications />
               </ProtectedRoute>
             }
@@ -178,7 +209,7 @@ function App() {
           <Route
             path="dashboard/profile"
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dept_admin', 'employee']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Profile />
               </ProtectedRoute>
             }
@@ -186,11 +217,93 @@ function App() {
 
           {/* Dashboard Settings */}
           <Route path="dashboard/settings" element={<Settings />} />
+
+          {/* Leave Management - Employee View */}
+          <Route
+            path="dashboard/my-leaves"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <MyLeaves />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Leave Management - Admin Approval */}
+          <Route
+            path="dashboard/leave-approval"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod']}>
+                <LeaveApproval />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Leave Settings - Admin Only */}
+          <Route
+            path="dashboard/leave-settings"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <LeaveSettings />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Attendance Management - Procurement Only */}
+          <Route
+            path="dashboard/attendance"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <Attendance />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* GPS Attendance - Branch Employees */}
+          <Route
+            path="dashboard/gps-attendance"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <GpsAttendance />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Branch Management - Admin Only */}
+          <Route
+            path="dashboard/branches"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod']}>
+                <BranchManagement />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Attendance Reports - Admin/Procurement Only */}
+          <Route
+            path="dashboard/attendance-reports"
+            element={
+              <ProtectedRoute allowedRoles={['admin']} allowProcurement={true}>
+                <AttendanceReports />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Attendance Administration - Admin Only */}
+          <Route
+            path="dashboard/attendance-admin"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AttendanceAdmin />
+              </ProtectedRoute>
+            }
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 

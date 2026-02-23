@@ -18,10 +18,21 @@ class GroupController extends Controller
         $user = $request->user();
         $query = Group::with(['department', 'creator', 'members']);
 
-        // Filter by department for dept admins
-        if ($user->isDeptAdmin()) {
-            $managedDepts = $user->managed_department_ids ?? [];
-            $query->whereIn('department_id', $managedDepts);
+        // Filter based on user role
+        // Admins can see all groups
+        // HODs can see all groups (for cross-department collaboration)
+        // All employees (including senior employees) see only groups they are members of or created
+        if ($user->isAdmin()) {
+            // Admin sees all groups
+        } elseif ($user->isHod()) {
+            // HODs can see all groups (for cross-department collaboration)
+        } else {
+            // All Employees (including Senior Employees) see only groups they're involved in
+            $query->where(function($q) use ($user) {
+                $q->whereHas('members', function($mq) use ($user) {
+                    $mq->where('users.id', $user->id);
+                })->orWhere('created_by', $user->id);
+            });
         }
 
         if ($request->has('department_id')) {
@@ -52,7 +63,9 @@ class GroupController extends Controller
     {
         $user = $request->user();
 
-        if ($user->isEmployee()) {
+        // Only regular employees cannot create groups
+        // Admin, HOD, and Senior Employee can all create groups
+        if ($user->isEmployee() && !$user->isSeniorEmployee()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -86,10 +99,8 @@ class GroupController extends Controller
             ], 422);
         }
 
-        // Check if dept admin can create group in this department
-        if ($user->isDeptAdmin() && !$user->managesDepartment($request->department_id)) {
-            return response()->json(['message' => 'You cannot create groups in this department'], 403);
-        }
+        // Admin, HOD, and Senior Employees can create groups in ANY department
+        // No department restriction for group creation
 
         // Verify all leader_ids are in member_ids
         $invalidLeaders = array_diff($request->leader_ids ?? [], $request->member_ids);
@@ -99,17 +110,8 @@ class GroupController extends Controller
             ], 422);
         }
 
-        // Verify all members belong to the department
-        $members = User::whereIn('id', $request->member_ids)->get();
-        $invalidMembers = $members->filter(function ($member) use ($request) {
-            return $member->department_id != $request->department_id;
-        });
-
-        if ($invalidMembers->count() > 0) {
-            return response()->json([
-                'message' => 'All members must belong to the selected department'
-            ], 422);
-        }
+        // Admin, HOD, and Senior Employees can add members from any department
+        // Skip department validation for members
 
         $group = Group::create([
             'name' => $request->name,
@@ -144,9 +146,15 @@ class GroupController extends Controller
             return response()->json(['message' => 'Group not found'], 404);
         }
 
-        // Check access
-        if ($user->isDeptAdmin() && !$user->managesDepartment($group->department_id)) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+        // Check access based on role
+        if ($user->isAdmin() || $user->isSeniorEmployee() || $user->isHod()) {
+            // Admin, Senior Employee, and HOD can see all groups
+        } else {
+            // Regular Employees can only see groups they are members of
+            $isMember = $group->members()->where('users.id', $user->id)->exists();
+            if (!$isMember) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
         }
 
         return response()->json([
@@ -166,14 +174,12 @@ class GroupController extends Controller
             return response()->json(['message' => 'Group not found'], 404);
         }
 
-        if ($user->isEmployee()) {
+        // Only regular employees cannot update groups
+        if ($user->isEmployee() && !$user->isSeniorEmployee()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Check if dept admin can update this group
-        if ($user->isDeptAdmin() && !$user->managesDepartment($group->department_id)) {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
+        // Admin, HOD, and Senior Employees can update groups in ANY department
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
@@ -248,14 +254,12 @@ class GroupController extends Controller
             return response()->json(['message' => 'Group not found'], 404);
         }
 
-        if ($user->isEmployee()) {
+        // Only regular employees cannot delete groups
+        if ($user->isEmployee() && !$user->isSeniorEmployee()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Check if dept admin can delete this group
-        if ($user->isDeptAdmin() && !$user->managesDepartment($group->department_id)) {
-            return response()->json(['message' => 'Unauthorized'], 403);
-        }
+        // Admin, HOD, and Senior Employees can delete groups in ANY department
 
         $group->delete();
 

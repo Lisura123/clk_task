@@ -37,7 +37,7 @@ class CreateFilamentAdmin extends Command
             'username' => $username,
             'email' => $email,
             'password' => Hash::make($password),
-            'role' => 'super_admin',
+            'role' => 'admin',
             'status' => 'active',
             'department' => 'Administration',
         ]);

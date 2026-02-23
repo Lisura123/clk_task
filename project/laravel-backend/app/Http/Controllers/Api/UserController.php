@@ -20,17 +20,26 @@ class UserController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = User::with('departmentRelation');
+        $query = User::with(['departmentRelation', 'branches']);
 
         \Log::info('UserController index called', [
             'user_id' => $user->id,
             'user_role' => $user->role,
             'is_dept_admin_check' => $user->isDeptAdmin(),
+            'is_procurement' => $user->isProcurement(),
             'managed_department_ids' => $user->managed_department_ids
         ]);
 
-        // Filter by managed departments for dept admin
-        if ($user->isDeptAdmin()) {
+        // Procurement users can see all employees (like admin)
+        // Admin can see all employees
+        // HOD can see their managed departments only
+        // Other employees should not access this endpoint
+        
+        if ($user->isProcurement()) {
+            // Procurement can see all users - no filtering needed
+            \Log::info('Procurement user - showing all users');
+        } elseif ($user->isDeptAdmin()) {
+            // Filter by managed departments for dept admin
             $managedDeptIds = $user->managed_department_ids ?? [];
             \Log::info('Dept Admin filtering users', [
                 'user_id' => $user->id,
@@ -63,7 +72,12 @@ class UserController extends Controller
                 \Log::warning('Dept admin has no managed departments');
                 $query->whereRaw('1 = 0');
             }
+        } elseif (!$user->isAdmin()) {
+            // Regular employees (non-procurement) should not see all users
+            // Return only users from their own department
+            $query->where('department_id', $user->department_id);
         }
+        // Admin sees all users - no filtering needed
 
         if ($request->has('department')) {
             $query->where('department', $request->department);
@@ -101,6 +115,99 @@ class UserController extends Controller
         });
 
         return response()->json($users);
+    }
+
+    /**
+     * Get a single user with full details
+     */
+    public function show(Request $request, $id)
+    {
+        $currentUser = $request->user();
+        
+        $user = User::with(['departmentRelation', 'assignedTasks', 'createdTasks', 'branches'])
+            ->findOrFail($id);
+        
+        // Permission check using the new canViewEmployeeDetails method
+        // Admin, Senior Employee, and Procurement can view all
+        // HOD can view employees in their managed departments
+        // Regular employees can only view themselves or same department
+        if (!$currentUser->canViewEmployeeDetails($user)) {
+            // Fall back to basic same-department check for regular employees
+            if ($currentUser->isEmployee() && !$currentUser->isSeniorEmployee()) {
+                if ($currentUser->id !== $user->id && $currentUser->department_id !== $user->department_id) {
+                    return response()->json(['message' => 'Unauthorized'], 403);
+                }
+            } else {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
+        }
+        
+        // Get task statistics
+        $assignedTasks = $user->assignedTasks;
+        $createdTasks = $user->createdTasks;
+        
+        $taskStats = [
+            'total_assigned' => $assignedTasks->count(),
+            'completed' => $assignedTasks->where('status', 'completed')->count(),
+            'in_progress' => $assignedTasks->where('status', 'in-progress')->count(),
+            'todo' => $assignedTasks->where('status', 'todo')->count(),
+            'on_hold' => $assignedTasks->where('status', 'on-hold')->count(),
+            'overdue' => $assignedTasks->where('status', '!=', 'completed')
+                ->filter(fn($t) => $t->due_date && \Carbon\Carbon::parse($t->due_date)->isPast())
+                ->count(),
+            'total_created' => $createdTasks->count(),
+        ];
+        
+        // Get recent tasks (last 10)
+        $recentTasks = $assignedTasks->sortByDesc('created_at')->take(10)->values();
+        
+        // Calculate completion rate
+        $completionRate = $taskStats['total_assigned'] > 0 
+            ? round(($taskStats['completed'] / $taskStats['total_assigned']) * 100, 1) 
+            : 0;
+        
+        // Get activity timeline (recent task status changes)
+        $recentActivity = \App\Models\TaskActivity::where('user_id', $user->id)
+            ->with('task')
+            ->orderBy('created_at', 'desc')
+            ->take(20)
+            ->get();
+        
+        // Department info
+        $department = $user->departmentRelation;
+        
+        // Managed departments (for HODs)
+        $managedDepartments = [];
+        if ($user->managed_department_ids) {
+            $managedDepartments = Department::whereIn('id', $user->managed_department_ids)->get(['id', 'name']);
+        }
+        
+        return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'emp_code' => $user->emp_code,
+                'name' => $user->name,
+                'username' => $user->username,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'status' => $user->status,
+                'profile_picture' => $user->profile_picture,
+                'department_id' => $user->department_id,
+                'department_name' => $department?->name ?? $user->department,
+                'managed_department_ids' => $user->managed_department_ids,
+                'managed_departments' => $managedDepartments,
+                'email_notifications' => $user->email_notifications,
+                'task_reminders' => $user->task_reminders,
+                'comment_notifications' => $user->comment_notifications,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at,
+            ],
+            'task_stats' => $taskStats,
+            'completion_rate' => $completionRate,
+            'recent_tasks' => $recentTasks,
+            'recent_activity' => $recentActivity,
+        ]);
     }
 
     /**
@@ -239,20 +346,28 @@ class UserController extends Controller
             'email' => 'required|string|email|max:100|unique:users',
             'password' => 'required|string|min:8',
             'department' => 'required|string|max:100',
-            'role' => 'required|in:employee,dept_admin',
+            'role' => 'required|in:employee,senior_employee,hod,admin',
             'phone' => 'nullable|string|max:20',
             'managed_department_ids' => 'nullable|array',
+            'branch' => 'nullable|string|max:255',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        // Validate branch is required for Sales department
+        if (strtolower($request->department) === 'sales' && empty($request->branch)) {
+            return response()->json([
+                'errors' => ['branch' => ['Branch location is required for Sales department.']]
+            ], 422);
+        }
+
         // Check if dept admin can create user in this department
-        if ($user->isDeptAdmin()) {
-            // HODs can only create employees, not other HODs
-            if ($request->role !== 'employee') {
-                return response()->json(['message' => 'HODs can only create employee accounts'], 403);
+        if ($user->isHod()) {
+            // HODs can only create employees and senior employees, not other HODs or admins
+            if (!in_array($request->role, ['employee', 'senior_employee'])) {
+                return response()->json(['message' => 'HODs can only create employee and senior employee accounts'], 403);
             }
             if (!$user->managesDepartment($request->department)) {
                 return response()->json(['message' => 'You cannot create users for this department'], 403);
@@ -275,6 +390,23 @@ class UserController extends Controller
             'status' => 'active',
         ]);
 
+        // If Sales department and branch provided, create branch assignment
+        if (strtolower($request->department) === 'sales' && $request->branch) {
+            $branch = \App\Models\Branch::where('name', $request->branch)->first();
+            if ($branch) {
+                \App\Models\UserBranchAssignment::create([
+                    'user_id' => $newUser->id,
+                    'branch_id' => $branch->id,
+                    'is_primary_branch' => true,
+                    'status' => 'active',
+                    'assigned_by' => $user->id,
+                    'assigned_at' => now(),
+                    'effective_from' => now(),
+                    'notes' => 'Assigned during admin employee creation',
+                ]);
+            }
+        }
+
         // Send email notification with login credentials
         try {
             $credentials = [
@@ -283,6 +415,7 @@ class UserController extends Controller
                 'password' => $request->password, // Plain text password for email
                 'department' => $request->department,
                 'role' => $request->role,
+                'branch' => $request->branch,
             ];
             
             \Log::info('Sending employee account creation email to: ' . $newUser->email);
@@ -304,14 +437,97 @@ class UserController extends Controller
      */
     public function update(Request $request, $id)
     {
+        \Log::info('========= UPDATE METHOD CALLED =========', [
+            'target_user_id' => $id,
+            'all_input' => $request->all(),
+            'method' => $request->method(),
+        ]);
+        
         $user = $request->user();
         $targetUser = User::findOrFail($id);
 
-        if ($user->isEmployee()) {
+        \Log::info('Update context', [
+            'current_user_id' => $user->id,
+            'current_user_role' => $user->role,
+            'is_procurement' => $user->isProcurement(),
+            'is_admin' => $user->isAdmin(),
+            'is_hod' => $user->isHod(),
+            'is_employee' => $user->isEmployee(),
+        ]);
+
+        // Regular employees cannot update other users
+        if ($user->isEmployee() && !$user->isProcurement()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if ($user->isDeptAdmin() && !$user->managesDepartment($targetUser->department)) {
+        // Procurement users can update employee data (like Admin/HOD)
+        if ($user->isProcurement() && !$user->isAdmin() && !$user->isHod()) {
+            \Log::info('Procurement update request', [
+                'all_input' => $request->all(),
+                'emp_code_input' => $request->input('emp_code'),
+                'has_emp_code' => $request->has('emp_code'),
+            ]);
+            
+            // Procurement can update basic employee info but not roles/status for non-procurement departments
+            $validator = Validator::make($request->all(), [
+                'name' => 'sometimes|string|max:255',
+                'username' => 'sometimes|string|max:50|unique:users,username,' . $id,
+                'email' => 'sometimes|email|unique:users,email,' . $id,
+                'phone' => 'sometimes|nullable|string|max:20',
+                'phone_number' => 'sometimes|nullable|string|max:20',
+                'emp_code' => 'sometimes|nullable|string|max:50|unique:users,emp_code,' . $id,
+                'department_id' => 'sometimes|exists:departments,id',
+            ]);
+            
+            if ($validator->fails()) {
+                return response()->json(['errors' => $validator->errors()], 422);
+            }
+            
+            $updateData = $request->only(['name', 'username', 'email', 'phone', 'emp_code', 'department_id']);
+            
+            // Map phone_number to phone if provided
+            if ($request->has('phone_number')) {
+                $updateData['phone'] = $request->phone_number;
+            }
+            
+            // If department_id is provided, get the department name
+            if ($request->has('department_id') && $request->department_id) {
+                $department = \App\Models\Department::find($request->department_id);
+                if ($department) {
+                    $updateData['department'] = $department->name;
+                }
+            }
+            
+            // Handle emp_code explicitly - keep it even if empty (to clear it)
+            $empCodeValue = $request->input('emp_code');
+            if ($request->has('emp_code')) {
+                $updateData['emp_code'] = !empty($empCodeValue) ? $empCodeValue : null;
+            }
+            
+            // Filter out null/empty values for other fields, but keep emp_code
+            $finalData = [];
+            foreach ($updateData as $key => $value) {
+                if ($key === 'emp_code') {
+                    $finalData[$key] = $value; // Always include emp_code
+                } elseif ($value !== null && $value !== '') {
+                    $finalData[$key] = $value;
+                }
+            }
+            
+            \Log::info('Final update data', ['finalData' => $finalData, 'target_user_id' => $targetUser->id]);
+            
+            $targetUser->update($finalData);
+            
+            \Log::info('After update', ['emp_code' => $targetUser->fresh()->emp_code]);
+            
+            return response()->json([
+                'message' => 'User updated successfully',
+                'user' => $targetUser->fresh(),
+            ]);
+        }
+
+        // HOD can only update users in their managed departments
+        if ($user->isDeptAdmin() && !$user->isAdmin() && !$user->managesDepartment($targetUser->department)) {
             return response()->json(['message' => 'You cannot update users from this department'], 403);
         }
 
@@ -322,11 +538,12 @@ class UserController extends Controller
             'password' => 'sometimes|nullable|string|min:8',
             'department' => 'sometimes|string|max:100',
             'department_id' => 'sometimes|exists:departments,id',
-            'role' => 'sometimes|in:employee,dept_admin,super_admin',
+            'role' => 'sometimes|in:employee,senior_employee,hod,admin',
             'phone' => 'sometimes|nullable|string|max:20',
             'phone_number' => 'sometimes|nullable|string|max:20',
             'status' => 'sometimes|in:pending,active,inactive,rejected',
             'managed_department_ids' => 'sometimes|nullable|array',
+            'emp_code' => 'sometimes|nullable|string|max:50|unique:users,emp_code,' . $id,
         ]);
 
         if ($validator->fails()) {
@@ -334,12 +551,18 @@ class UserController extends Controller
         }
 
         // Dept admins cannot change roles to super_admin
-        if ($user->isDeptAdmin() && $request->has('role') && $request->role === 'super_admin') {
+        if ($user->isDeptAdmin() && $request->has('role') && $request->role === 'admin') {
             return response()->json(['message' => 'You cannot assign super admin role'], 403);
         }
 
         // Handle department_id to department name conversion
-        $updateData = $request->all();
+        $updateData = $request->only([
+            'name', 'username', 'email', 'password', 'department', 
+            'department_id', 'role', 'phone', 'phone_number', 'status', 
+            'managed_department_ids', 'emp_code'
+        ]);
+        
+        \Log::info('General update - validated request data', ['data' => $updateData, 'emp_code' => $request->input('emp_code')]);
         
         // Map phone_number to phone if provided
         if ($request->has('phone_number')) {
@@ -356,6 +579,11 @@ class UserController extends Controller
             }
         }
         
+        // Handle emp_code explicitly
+        if ($request->has('emp_code')) {
+            $updateData['emp_code'] = $request->input('emp_code') ?: null;
+        }
+        
         // Hash password if provided
         if ($request->has('password') && $request->password) {
             $updateData['password'] = Hash::make($request->password);
@@ -363,11 +591,15 @@ class UserController extends Controller
             unset($updateData['password']);
         }
 
+        \Log::info('Final update data', ['finalData' => $updateData, 'target_user_id' => $targetUser->id]);
+        
         $targetUser->update($updateData);
+        
+        \Log::info('After update', ['emp_code' => $targetUser->fresh()->emp_code]);
 
         return response()->json([
             'message' => 'User updated successfully',
-            'user' => $targetUser,
+            'user' => $targetUser->fresh(),
         ]);
     }
 
@@ -403,7 +635,21 @@ class UserController extends Controller
      */
     public function statistics(Request $request, $id)
     {
+        $user = $request->user();
         $targetUser = User::findOrFail($id);
+
+        // Authorization check - only admins, HODs (for their department), or the user themselves can view stats
+        if ($user->id !== $targetUser->id) {
+            // Not viewing own stats - need to be admin or HOD
+            if ($user->isEmployee() && !$user->isSeniorEmployee()) {
+                return response()->json(['message' => 'Unauthorized to view other user statistics'], 403);
+            }
+            
+            // HODs can only view stats for users in their managed departments
+            if ($user->isHod() && !$user->isAdmin() && !$user->managesDepartment($targetUser->department)) {
+                return response()->json(['message' => 'You can only view statistics for users in your department'], 403);
+            }
+        }
 
         $stats = [
             'total_tasks' => $targetUser->assignedTasks()->count(),
@@ -423,25 +669,61 @@ class UserController extends Controller
     public function basicList(Request $request)
     {
         $user = $request->user();
-        $query = User::select('id', 'name', 'email', 'role', 'department')
+        $query = User::select('id', 'username', 'name', 'email', 'role', 'department', 'department_id', 'status')
             ->where('status', 'active');
 
         // Filter by department for dept admins
         if ($user->isDeptAdmin()) {
             $managedDepts = $user->managed_department_ids ?? [];
-            $query->whereIn('department', $managedDepts);
+            // Filter by department_id (integer) not department (string)
+            if (!empty($managedDepts)) {
+                $query->whereIn('department_id', $managedDepts);
+            }
         }
 
         $users = $query->get()->map(function ($u) {
             return [
                 'id' => $u->id,
+                'username' => $u->username,
                 'name' => $u->name,
                 'email' => $u->email,
                 'role' => $u->role,
                 'department' => $u->department,
+                'department_id' => $u->department_id,
+                'status' => $u->status,
             ];
         });
 
         return response()->json(['users' => $users]);
+    }
+
+    /**
+     * Mark onboarding as completed for the current user
+     */
+    public function markOnboardingComplete(Request $request)
+    {
+        $user = $request->user();
+        $user->onboarding_completed = true;
+        $user->save();
+
+        return response()->json([
+            'message' => 'Onboarding marked as complete',
+            'onboarding_completed' => true
+        ]);
+    }
+
+    /**
+     * Reset onboarding status to show tour again
+     */
+    public function resetOnboarding(Request $request)
+    {
+        $user = $request->user();
+        $user->onboarding_completed = false;
+        $user->save();
+
+        return response()->json([
+            'message' => 'Onboarding reset successfully',
+            'onboarding_completed' => false
+        ]);
     }
 }

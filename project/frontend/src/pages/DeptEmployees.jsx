@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Users, Search as SearchIcon, UserCheck, UserX, Edit2, X, Save, Mail, Phone, Building2, Shield } from 'lucide-react';
 import useAuthStore from '../store/authStore';
 import api from '../services/api';
+import { useToast } from '../components/Toast';
 
 const DeptEmployees = () => {
   const { user } = useAuthStore();
+  const toast = useToast();
   const [employees, setEmployees] = useState([]);
   const [filteredEmployees, setFilteredEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +46,7 @@ const DeptEmployees = () => {
       const stats = {
         total: activeUsers.length,
         active: activeUsers.filter(u => u.status === 'active').length,
-        deptAdmins: activeUsers.filter(u => u.role === 'dept_admin').length,
+        deptAdmins: activeUsers.filter(u => u.role === 'hod').length,
         inactive: activeUsers.filter(u => u.status === 'inactive').length
       };
       setStats(stats);
@@ -85,7 +87,8 @@ const DeptEmployees = () => {
       name: employee.name || '',
       email: employee.email || '',
       phone: employee.phone || '',
-      department_id: employee.department_id || ''
+      department_id: employee.department_id || '',
+      emp_code: employee.emp_code || ''
     });
     setEditModal({ open: true, employee });
   };
@@ -108,10 +111,10 @@ const DeptEmployees = () => {
       await api.put(`/users/${editModal.employee.id}`, formData);
       await fetchEmployees();
       handleCloseModal();
-      alert('Employee updated successfully');
+      toast.success('Employee updated successfully');
     } catch (error) {
       console.error('Error updating employee:', error);
-      alert(error.response?.data?.message || 'Failed to update employee');
+      toast.error(error.response?.data?.message || 'Failed to update employee');
     }
   };
 
@@ -128,8 +131,10 @@ const DeptEmployees = () => {
 
   const getRoleBadge = (role) => {
     switch (role) {
-      case 'dept_admin':
+      case 'hod':
         return 'bg-purple-100 text-purple-800 border-purple-200';
+      case 'senior_employee':
+        return 'bg-orange-100 text-orange-800 border-orange-200';
       case 'employee':
         return 'bg-blue-100 text-blue-800 border-blue-200';
       default:
@@ -217,7 +222,8 @@ const DeptEmployees = () => {
           >
             <option value="all">All Roles</option>
             <option value="employee">Employee</option>
-            <option value="dept_admin">HOD</option>
+            <option value="senior_employee">Senior Employee</option>
+            <option value="hod">HOD</option>
           </select>
 
           <select
@@ -289,7 +295,7 @@ const DeptEmployees = () => {
                 <div className="flex items-center gap-2 text-sm">
                   <Shield className="w-4 h-4 text-gray-500" />
                   <span className={`text-xs px-2 py-0.5 rounded-full border ${getRoleBadge(employee.role)}`}>
-                    {employee.role === 'super_admin' ? 'ADMIN' : employee.role === 'dept_admin' ? 'HOD' : 'EMPLOYEE'}
+                    {employee.role === 'admin' ? 'ADMIN' : employee.role === 'hod' ? 'HOD' : employee.role === 'senior_employee' ? 'SENIOR' : 'EMPLOYEE'}
                   </span>
                 </div>
               </div>
@@ -333,6 +339,26 @@ const DeptEmployees = () => {
                     onChange={handleInputChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Employee Code
+                  </label>
+                  <input
+                    type="text"
+                    name="emp_code"
+                    value={formData.emp_code || ''}
+                    onChange={(e) => {
+                      // Only allow numeric values
+                      const value = e.target.value.replace(/[^0-9]/g, '');
+                      setFormData({ ...formData, emp_code: value });
+                    }}
+                    placeholder="e.g., 124"
+                    pattern="[0-9]*"
+                    inputMode="numeric"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                   />
                 </div>
 

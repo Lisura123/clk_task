@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Http\Controllers\Api\WebPushController;
 
 class Notification extends Model
 {
@@ -23,6 +24,35 @@ class Notification extends Model
     protected $casts = [
         'read_status' => 'boolean',
     ];
+
+    /**
+     * Boot the model
+     */
+    protected static function booted()
+    {
+        static::created(function ($notification) {
+            // Send web push notification when a notification is created
+            try {
+                WebPushController::sendToUser($notification->user_id, [
+                    'title' => $notification->title ?? 'New Notification',
+                    'body' => $notification->message ?? '',
+                    'icon' => '/favicon.svg',
+                    'badge' => '/favicon.svg',
+                    'tag' => 'notification-' . $notification->id,
+                    'data' => [
+                        'notification_id' => $notification->id,
+                        'task_id' => $notification->task_id,
+                        'type' => $notification->type,
+                        'url' => $notification->task_id 
+                            ? '/dashboard/tasks/' . $notification->task_id 
+                            : '/dashboard/notifications'
+                    ]
+                ]);
+            } catch (\Exception $e) {
+                \Log::debug('Web push failed: ' . $e->getMessage());
+            }
+        });
+    }
 
     /**
      * Get the user who receives this notification

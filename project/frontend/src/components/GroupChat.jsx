@@ -13,9 +13,13 @@ import {
 import { groupMessageAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
 import { formatDistanceToNow } from 'date-fns';
+import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 export default function GroupChat({ group, onClose }) {
   const { user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -77,7 +81,7 @@ export default function GroupChat({ group, onClose }) {
       scrollToBottom();
     } catch (error) {
       console.error('Error sending message:', error);
-      alert('Failed to send message');
+      toast.error('Failed to send message');
     } finally {
       setSending(false);
     }
@@ -97,19 +101,27 @@ export default function GroupChat({ group, onClose }) {
       setEditText('');
     } catch (error) {
       console.error('Error updating message:', error);
-      alert('Failed to update message');
+      toast.error('Failed to update message');
     }
   };
 
   const handleDeleteMessage = async (messageId) => {
-    if (!confirm('Are you sure you want to delete this message?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Message',
+      message: 'Are you sure you want to delete this message?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await groupMessageAPI.deleteMessage(group.id, messageId);
       setMessages(prev => prev.filter(msg => msg.id !== messageId));
+      toast.success('Message deleted');
     } catch (error) {
       console.error('Error deleting message:', error);
-      alert('Failed to delete message');
+      toast.error('Failed to delete message');
     }
   };
 
@@ -127,8 +139,8 @@ export default function GroupChat({ group, onClose }) {
 
   const canModifyMessage = (message) => {
     return message.user_id === user?.id || 
-           user?.role === 'super_admin' || 
-           (user?.role === 'dept_admin' && group.created_by === user?.id);
+           user?.role === 'admin' || 
+           (user?.role === 'hod' && group.created_by === user?.id);
   };
 
   const canEditMessage = (message) => {
@@ -155,10 +167,12 @@ export default function GroupChat({ group, onClose }) {
 
   const getRoleBadge = (role) => {
     switch (role) {
-      case 'super_admin':
+      case 'admin':
         return <span className="ml-1 px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">Admin</span>;
-      case 'dept_admin':
+      case 'hod':
         return <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">HOD</span>;
+      case 'senior_employee':
+        return <span className="ml-1 px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded">Senior</span>;
       default:
         return null;
     }

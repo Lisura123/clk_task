@@ -35,7 +35,7 @@ class DailyWorkLogController extends Controller
         }
 
         // Filter by user (for admins viewing specific user's logs)
-        if ($request->has('user_id') && ($user->role === 'super_admin' || $user->role === 'dept_admin')) {
+        if ($request->has('user_id') && ($user->role === 'admin' || $user->role === 'hod')) {
             $query->where('user_id', $request->user_id);
         }
 
@@ -79,7 +79,7 @@ class DailyWorkLogController extends Controller
     {
         $user = Auth::user();
 
-        if ($user->role !== 'super_admin' && $user->role !== 'dept_admin') {
+        if ($user->role !== 'admin' && $user->role !== 'hod') {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
@@ -91,7 +91,7 @@ class DailyWorkLogController extends Controller
         $query->whereBetween('work_date', [$from, $to]);
 
         // For dept admin, filter by their departments
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedDeptIds = $user->managed_department_ids ?? [];
             if (empty($managedDeptIds) && $user->department_id) {
                 $managedDeptIds = [$user->department_id];
@@ -223,7 +223,7 @@ class DailyWorkLogController extends Controller
         $user = Auth::user();
 
         // Only the log creator or admin can delete
-        $canDelete = $log->user_id === $user->id || $user->role === 'super_admin';
+        $canDelete = $log->user_id === $user->id || $user->role === 'admin';
         
         if (!$canDelete) {
             return response()->json(['error' => 'Unauthorized'], 403);
@@ -244,11 +244,11 @@ class DailyWorkLogController extends Controller
      */
     private function canAccessTask($user, Task $task): bool
     {
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             // Check if task is in their department
             $managedDeptIds = $user->managed_department_ids ?? [];
             if (empty($managedDeptIds) && $user->department_id) {

@@ -16,9 +16,13 @@ import {
 import { formatDistanceToNow, format } from 'date-fns';
 import api, { timeEntryAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+import { useToast } from './Toast';
+import { useConfirm } from './ConfirmDialog';
 
 const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
   const { token, user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [timeEntries, setTimeEntries] = useState([]);
   const [summary, setSummary] = useState(null);
   const [activeTimer, setActiveTimer] = useState(null);
@@ -133,7 +137,7 @@ const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
       }
     } catch (err) {
       console.error('Failed to start timer:', err);
-      alert(err.response?.data?.message || 'Failed to start timer');
+      toast.error(err.response?.data?.message || 'Failed to start timer');
     }
   };
 
@@ -148,7 +152,7 @@ const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
       fetchTimeSummary();
     } catch (err) {
       console.error('Failed to stop timer:', err);
-      alert('Failed to stop timer');
+      toast.error('Failed to stop timer');
     }
   };
 
@@ -183,20 +187,28 @@ const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
       fetchTimeSummary();
     } catch (err) {
       console.error('Failed to add time entry:', err);
-      alert('Failed to add time entry');
+      toast.error('Failed to add time entry');
     }
   };
 
   const handleDeleteEntry = async (entryId) => {
-    if (!confirm('Are you sure you want to delete this time entry?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Time Entry',
+      message: 'Are you sure you want to delete this time entry?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await timeEntryAPI.delete(entryId);
       fetchTimeEntries();
       fetchTimeSummary();
+      toast.success('Time entry deleted');
     } catch (err) {
       console.error('Failed to delete entry:', err);
-      alert('Failed to delete time entry');
+      toast.error('Failed to delete time entry');
     }
   };
 

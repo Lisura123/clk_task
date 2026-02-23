@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { UserPlus, Save, X, Eye, EyeOff } from 'lucide-react';
 import { authAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+import { useToast } from './Toast';
 
 const CreateEmployee = ({ onClose, onSuccess }) => {
   const { user } = useAuthStore();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [departments, setDepartments] = useState([]);
   const [showPassword, setShowPassword] = useState(false);
@@ -80,7 +82,7 @@ const CreateEmployee = ({ onClose, onSuccess }) => {
       if (response.data.success) {
         onSuccess && onSuccess(response.data.data);
         onClose && onClose();
-        alert(`${formData.role === 'employee' ? 'Employee' : 'Admin'} account created successfully!`);
+        toast.success(`${formData.role === 'employee' ? 'Employee' : 'Admin'} account created successfully!`);
       }
     } catch (error) {
       const errorMessage = error.response?.data?.message || 'Failed to create account';
@@ -91,7 +93,7 @@ const CreateEmployee = ({ onClose, onSuccess }) => {
         });
         setErrors(validationErrors);
       } else {
-        alert(errorMessage);
+        toast.error(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -245,7 +247,7 @@ const CreateEmployee = ({ onClose, onSuccess }) => {
           </div>
 
           {/* Role */}
-          {user.role === 'super_admin' && (
+          {user.role === 'admin' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Role
@@ -257,8 +259,9 @@ const CreateEmployee = ({ onClose, onSuccess }) => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
               >
                 <option value="employee">Employee</option>
-                <option value="dept_admin">Department Admin</option>
-                <option value="super_admin">Super Admin</option>
+                <option value="senior_employee">Senior Employee</option>
+                <option value="hod">Head of Department (HOD)</option>
+                <option value="admin">Admin</option>
               </select>
             </div>
           )}

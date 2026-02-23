@@ -29,10 +29,18 @@ class AuthController extends Controller
             'password' => 'required|string|min:8|confirmed',
             'department' => 'required|string|max:100',
             'phone' => 'nullable|string|max:20',
+            'branch' => 'nullable|string|max:255', // Branch for Sales department
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
+        }
+        
+        // Validate branch is required for Sales department
+        if (strtolower($request->department) === 'sales' && empty($request->branch)) {
+            return response()->json([
+                'errors' => ['branch' => ['Branch location is required for Sales department.']]
+            ], 422);
         }
 
         $user = User::create([
@@ -45,6 +53,22 @@ class AuthController extends Controller
             'role' => 'employee',
             'status' => 'pending', // Requires admin approval
         ]);
+        
+        // If Sales department and branch provided, create branch assignment
+        if (strtolower($request->department) === 'sales' && $request->branch) {
+            $branch = \App\Models\Branch::where('name', $request->branch)->first();
+            if ($branch) {
+                \App\Models\UserBranchAssignment::create([
+                    'user_id' => $user->id,
+                    'branch_id' => $branch->id,
+                    'is_primary_branch' => true,
+                    'status' => 'active',
+                    'assigned_at' => now(),
+                    'effective_from' => now(),
+                    'notes' => 'Assigned during self-registration',
+                ]);
+            }
+        }
 
         // Notify all super admins and dept admins of the department about new registration
         // First, find the department ID from the department name
@@ -52,14 +76,14 @@ class AuthController extends Controller
         $departmentId = $department ? $department->id : null;
         
         // Get super admins
-        $superAdmins = User::where('role', 'super_admin')
+        $superAdmins = User::where('role', 'admin')
             ->where('status', 'active')
             ->get();
         
         // Get HODs who manage this department
         $hodAdmins = collect();
         if ($departmentId) {
-            $hodAdmins = User::where('role', 'dept_admin')
+            $hodAdmins = User::where('role', 'hod')
                 ->where('status', 'active')
                 ->whereNotNull('managed_department_ids')
                 ->get()
@@ -147,7 +171,7 @@ class AuthController extends Controller
     public function me(Request $request)
     {
         return response()->json([
-            'user' => $request->user()->load('departmentRelation'),
+            'user' => $request->user()->load(['departmentRelation', 'branches']),
         ]);
     }
 
@@ -173,7 +197,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Profile updated successfully',
-            'user' => $user->fresh()->load('departmentRelation'),
+            'user' => $user->fresh()->load(['departmentRelation', 'branches']),
         ]);
     }
 

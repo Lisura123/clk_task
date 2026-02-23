@@ -110,6 +110,9 @@ export const taskAPI = {
   archive: (id) => api.post(`/tasks/${id}/archive`),
   restore: (id) => api.post(`/tasks/${id}/restore`),
   getStatistics: () => api.get('/tasks/statistics'),
+  // Subtask APIs
+  getSubtasks: (taskId) => api.get(`/tasks/${taskId}/subtasks`),
+  createSubtask: (taskId, data) => api.post(`/tasks/${taskId}/subtasks`, data),
 };
 
 // Dashboard APIs
@@ -201,6 +204,44 @@ export const planDailyEntryAPI = {
   getAll: (planId) => api.get(`/scheduled-plans/${planId}/daily-entries`),
   getByDate: (planId, date) => api.get(`/scheduled-plans/${planId}/daily-entries/${date}`),
   update: (planId, date, data) => api.put(`/scheduled-plans/${planId}/daily-entries/${date}`, data),
+};
+
+// Leave Management API
+export const leaveAPI = {
+  // Leave Types
+  getLeaveTypes: () => api.get('/leave-types'),
+  createLeaveType: (data) => api.post('/leave-types', data),
+  updateLeaveType: (id, data) => api.put(`/leave-types/${id}`, data),
+  deleteLeaveType: (id) => api.delete(`/leave-types/${id}`),
+  
+  // Leave Balances
+  getMyBalances: () => api.get('/leave-balances'),
+  getUserBalances: (userId) => api.get(`/users/${userId}/leave-balances`),
+  updateBalance: (id, data) => api.put(`/leave-balances/${id}`, data),
+  
+  // Leave Requests
+  getMyLeaves: (params) => api.get('/leaves/my', { params }),
+  getAllLeaves: (params) => api.get('/leaves', { params }),
+  getPendingLeaves: () => api.get('/leaves/pending'),
+  getLeave: (id) => api.get(`/leaves/${id}`),
+  createLeave: (data) => api.post('/leaves', data),
+  approveLeave: (id, data) => api.post(`/leaves/${id}/approve`, data),
+  rejectLeave: (id, data) => api.post(`/leaves/${id}/reject`, data),
+  cancelLeave: (id) => api.post(`/leaves/${id}/cancel`),
+  
+  // Statistics & Calendar
+  getStatistics: (params) => api.get('/leaves/statistics', { params }),
+  getCalendar: (params) => api.get('/leaves/calendar', { params }),
+  getTeamOnLeave: () => api.get('/leaves/team-on-leave'),
+  
+  // Holidays
+  getHolidays: (params) => api.get('/holidays', { params }),
+  createHoliday: (data) => api.post('/holidays', data),
+  updateHoliday: (id, data) => api.put(`/holidays/${id}`, data),
+  deleteHoliday: (id) => api.delete(`/holidays/${id}`),
+  
+  // Utility
+  calculateDays: (params) => api.get('/leaves/calculate-days', { params }),
 };
 
 export default api;

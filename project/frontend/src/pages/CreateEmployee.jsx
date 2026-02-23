@@ -1,7 +1,17 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { UserPlus, Eye, EyeOff, RefreshCw, AlertCircle, CheckCircle, X, MapPin } from 'lucide-react';
 import { authAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
+
+// CameraLK Branch locations
+const CAMERALK_BRANCHES = [
+  { id: 'colombo', name: 'CameraLK Colombo' },
+  { id: 'majestic', name: 'CameraLK Majestic City' },
+  { id: 'kandy', name: 'CameraLK Kandy' },
+  { id: 'jaffna', name: 'CameraLK Jaffna' },
+  { id: 'batticaloa', name: 'CameraLK Batticaloa' },
+  { id: 'tissamaharama', name: 'CameraLK Tissamaharama' },
+];
 
 export default function CreateEmployee() {
   const { user } = useAuthStore();
@@ -20,9 +30,13 @@ export default function CreateEmployee() {
     department: '',
     role: 'employee',
     phone: '',
-    managed_department_ids: []
+    managed_department_ids: [],
+    branch: ''
   });
   const [errors, setErrors] = useState({});
+  
+  // Check if Sales department is selected
+  const isSalesDepartment = formData.department.toLowerCase() === 'sales';
 
   useEffect(() => {
     fetchDepartments();
@@ -36,7 +50,7 @@ export default function CreateEmployee() {
     console.log('departments length:', departments.length);
     console.log('formData.department:', formData.department);
     
-    if (user?.role === 'dept_admin' && departments.length > 0) {
+    if (user?.role === 'hod' && departments.length > 0) {
       console.log('Auto-setting department for dept admin');
       console.log('Departments:', departments);
       console.log('First department:', departments[0]);
@@ -56,12 +70,12 @@ export default function CreateEmployee() {
       let availableDepartments = response.data || [];
       
       // Store all departments for HOD multi-selection (admin only)
-      if (user?.role === 'super_admin') {
+      if (user?.role === 'admin') {
         setAllDepartments(availableDepartments);
       }
       
       // Filter departments for dept admins
-      if (user?.role === 'dept_admin') {
+      if (user?.role === 'hod') {
         const managedDeptIds = user.managed_department_ids || [];
         availableDepartments = availableDepartments.filter(dept => 
           managedDeptIds.includes(dept.id)
@@ -121,10 +135,15 @@ export default function CreateEmployee() {
     }
 
     // Validate managed departments for HOD role
-    if (formData.role === 'dept_admin' && user?.role === 'super_admin') {
+    if (formData.role === 'hod' && user?.role === 'admin') {
       if (!formData.managed_department_ids || formData.managed_department_ids.length === 0) {
         newErrors.managed_department_ids = 'Please select at least one department for the HOD to manage';
       }
+    }
+
+    // Validate branch for Sales department
+    if (formData.department.toLowerCase() === 'sales' && !formData.branch) {
+      newErrors.branch = 'Please select a branch location for Sales employees';
     }
 
     setErrors(newErrors);
@@ -142,12 +161,12 @@ export default function CreateEmployee() {
     try {
       // Ensure department is set for dept admins
       const submitData = { ...formData };
-      if (user?.role === 'dept_admin' && departments.length > 0 && !submitData.department) {
+      if (user?.role === 'hod' && departments.length > 0 && !submitData.department) {
         submitData.department = departments[0].name;
       }
       
       // Include managed_department_ids for HOD role
-      if (submitData.role === 'dept_admin' && submitData.managed_department_ids.length > 0) {
+      if (submitData.role === 'hod' && submitData.managed_department_ids.length > 0) {
         submitData.managed_department_ids = submitData.managed_department_ids.map(id => parseInt(id));
       }
       
@@ -161,7 +180,8 @@ export default function CreateEmployee() {
           department: formData.department,
           role: formData.role,
           password: generatedPassword,
-          managed_department_ids: formData.managed_department_ids
+          managed_department_ids: formData.managed_department_ids,
+          branch: formData.branch
         });
         setShowSuccess(true);
         
@@ -174,7 +194,8 @@ export default function CreateEmployee() {
           department: '',
           role: 'employee',
           phone: '',
-          managed_department_ids: []
+          managed_department_ids: [],
+          branch: ''
         });
         generatePassword();
         setErrors({});
@@ -190,7 +211,13 @@ export default function CreateEmployee() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    
+    // If department changes away from Sales, clear the branch
+    if (name === 'department' && value.toLowerCase() !== 'sales') {
+      setFormData(prev => ({ ...prev, [name]: value, branch: '' }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
     
     // Clear error when user starts typing
     if (errors[name]) {
@@ -211,25 +238,25 @@ export default function CreateEmployee() {
         <div>
           <h1 className="text-3xl font-bold text-black">Create Employee Account</h1>
           <p className="text-gray-600 mt-1">
-            {user?.role === 'dept_admin' 
+            {user?.role === 'hod' 
               ? `Add new employees to your department`
               : 'Create immediate active employee accounts with system access'
             }
           </p>
         </div>
         <div className={`px-4 py-2 rounded-lg ${
-          user?.role === 'dept_admin' 
+          user?.role === 'hod' 
             ? 'bg-orange-100 text-orange-800' 
             : 'bg-green-100 text-green-800'
         }`}>
           <span className="font-semibold">
-            {user?.role === 'dept_admin' ? 'HOD' : 'Admin'}
+            {user?.role === 'hod' ? 'HOD' : 'Admin'}
           </span> Registration
         </div>
       </div>
 
       {/* HOD Department Context Banner */}
-      {user?.role === 'dept_admin' && departments.length > 0 && (
+      {user?.role === 'hod' && departments.length > 0 && (
         <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-lg p-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
@@ -254,7 +281,7 @@ export default function CreateEmployee() {
       )}
 
       {/* Info Banner - Only for Admins */}
-      {user?.role === 'super_admin' && (
+      {user?.role === 'admin' && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <div className="flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
@@ -292,9 +319,15 @@ export default function CreateEmployee() {
                 <div className="font-medium">{createdEmployee.username}</div>
                 <div className="text-gray-600">Department:</div>
                 <div className="font-medium">{createdEmployee.department}</div>
+                {createdEmployee.branch && (
+                  <>
+                    <div className="text-gray-600">Branch:</div>
+                    <div className="font-medium">{createdEmployee.branch}</div>
+                  </>
+                )}
                 <div className="text-gray-600">Role:</div>
-                <div className="font-medium capitalize">{createdEmployee.role === 'dept_admin' ? 'Head of Department' : createdEmployee.role}</div>
-                {createdEmployee.role === 'dept_admin' && createdEmployee.managed_department_ids?.length > 0 && (
+                <div className="font-medium capitalize">{createdEmployee.role === 'hod' ? 'Head of Department' : createdEmployee.role}</div>
+                {createdEmployee.role === 'hod' && createdEmployee.managed_department_ids?.length > 0 && (
                   <>
                     <div className="text-gray-600">Manages:</div>
                     <div className="font-medium">
@@ -461,7 +494,7 @@ export default function CreateEmployee() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Department <span className="text-red-600">*</span>
                 </label>
-                {user?.role === 'dept_admin' ? (
+                {user?.role === 'hod' ? (
                   departments.length > 1 ? (
                     // HOD manages multiple departments - show dropdown
                     <div>
@@ -520,12 +553,45 @@ export default function CreateEmployee() {
                 )}
               </div>
 
+              {/* Branch Field - Only shown for Sales department */}
+              {isSalesDepartment && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Branch Location <span className="text-red-600">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      name="branch"
+                      value={formData.branch}
+                      onChange={handleChange}
+                      className={`w-full px-4 py-2 pl-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                        errors.branch ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Select branch location</option>
+                      {CAMERALK_BRANCHES.map((branch) => (
+                        <option key={branch.id} value={branch.name}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  </div>
+                  {errors.branch && (
+                    <p className="text-red-600 text-sm mt-1">{errors.branch}</p>
+                  )}
+                  <p className="text-gray-500 text-xs mt-1">
+                    Sales staff must be assigned to a CameraLK branch
+                  </p>
+                </div>
+              )}
+
               {/* Role */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Role <span className="text-red-600">*</span>
                 </label>
-                {user?.role === 'dept_admin' ? (
+                {user?.role === 'hod' ? (
                   <div className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -542,21 +608,22 @@ export default function CreateEmployee() {
                     onChange={(e) => {
                       handleChange(e);
                       // Clear managed departments when role changes
-                      if (e.target.value !== 'dept_admin') {
+                      if (e.target.value !== 'hod') {
                         setFormData(prev => ({ ...prev, managed_department_ids: [] }));
                       }
                     }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
                     <option value="employee">Employee</option>
-                    <option value="dept_admin">Head of Department (HOD)</option>
-                    <option value="super_admin">Admin</option>
+                    <option value="senior_employee">Senior Employee</option>
+                    <option value="hod">Head of Department (HOD)</option>
+                    <option value="admin">Admin</option>
                   </select>
                 )}
               </div>
 
               {/* Managed Departments - Only show for HOD role */}
-              {user?.role === 'super_admin' && formData.role === 'dept_admin' && (
+              {user?.role === 'admin' && formData.role === 'hod' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Managed Departments <span className="text-red-600">*</span>
@@ -688,7 +755,8 @@ export default function CreateEmployee() {
                   department: '',
                   role: 'employee',
                   phone: '',
-                  managed_department_ids: []
+                  managed_department_ids: [],
+                  branch: ''
                 });
                 generatePassword();
                 setErrors({});

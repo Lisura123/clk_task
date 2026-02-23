@@ -17,9 +17,13 @@ return [
         'http://localhost:3000',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
+        'https://cameralkstore.com',
+        'https://www.cameralkstore.com',
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^https?://(www\.)?cameralkstore\.com$#',
+    ],
 
     'allowed_headers' => ['*'],
 

@@ -3,19 +3,23 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Edit2, Save, X, Trash2, Calendar, Clock, AlertCircle, User, Users, Building2,
   FileText, MessageSquare, Send, Download, Paperclip, Upload, Reply, Percent, Link, ExternalLink, Plus,
-  ClipboardList
+  ClipboardList, ListTodo, CheckCircle2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import useAuthStore from '../store/authStore';
-import api, { workLogAPI } from '../services/api';
+import api, { workLogAPI, taskAPI, userAPI, departmentAPI } from '../services/api';
 import CommentThread from '../components/CommentThread';
 import CommentInput from '../components/CommentInput';
 import DailyWorkLog from '../components/DailyWorkLog';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 const TaskDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   
   // Basic Task State
   const [task, setTask] = useState(null);
@@ -32,6 +36,17 @@ const TaskDetails = () => {
   const [links, setLinks] = useState([]);
   const [workLogs, setWorkLogs] = useState([]);
   const [showWorkLogModal, setShowWorkLogModal] = useState(false);
+  
+  // Subtasks State
+  const [subtasks, setSubtasks] = useState([]);
+  const [showAddSubtaskModal, setShowAddSubtaskModal] = useState(false);
+  const [subtaskForm, setSubtaskForm] = useState({
+    title: '',
+    description: '',
+    priority: 'medium',
+    due_date: '',
+    assigned_to_id: ''
+  });
   
   // UI State
   const [activeTab, setActiveTab] = useState('details');
@@ -50,16 +65,16 @@ const TaskDetails = () => {
     try {
       setLoading(true);
       const [
-        taskRes, commentsRes, attachmentsRes, deptsRes, usersRes, participantsRes, linksRes, workLogsRes
+        taskRes, commentsRes, attachmentsRes, deptsRes, participantsRes, linksRes, workLogsRes, subtasksRes
       ] = await Promise.all([
         api.get(`/tasks/${id}`),
         api.get(`/tasks/${id}/comments`).catch(() => ({ data: { data: { comments: [] } } })),
         api.get(`/tasks/${id}/attachments`).catch(() => ({ data: { data: { attachments: [] } } })),
         api.get('/departments'),
-        api.get('/users/basic').catch(() => ({ data: { users: [] } })),
         api.get(`/tasks/${id}/participants`).catch(() => ({ data: { participants: [] } })),
         api.get(`/tasks/${id}/links`).catch(() => ({ data: { data: { links: [] } } })),
-        workLogAPI.getByTask(id).catch(() => ({ data: [] }))
+        workLogAPI.getByTask(id).catch(() => ({ data: [] })),
+        taskAPI.getSubtasks(id).catch(() => ({ data: { subtasks: [] } }))
       ]);
 
       const taskData = taskRes.data.data || taskRes.data.task;
@@ -81,17 +96,70 @@ const TaskDetails = () => {
       setAttachments(attachmentsRes.data.data?.attachments || []);
       setWorkLogs(workLogsRes.data || []);
       setLinks(linksRes.data.data?.links || linksRes.data.links || []);
+      setSubtasks(subtasksRes.data.subtasks || []);
       
       // Basic data
       setDepartments(deptsRes.data.departments || []);
-      setUsers(usersRes.data.users || []);
+      
+      // Fetch users based on role - improved logic
+      let usersList = [];
+      try {
+        if (user?.role === 'admin' || user?.role === 'senior_employee' || user?.role === 'hod') {
+          // Admin, Senior Employee, and HOD: fetch all employees from all departments
+          const deptsRes = await departmentAPI.getAllDepartments();
+          const deptData = Array.isArray(deptsRes.data) ? deptsRes.data : (deptsRes.data?.data || []);
+          const deptIds = deptData.map(d => d.id) || [];
+          
+          if (deptIds.length > 0) {
+            const employeePromises = deptIds.map(deptId => 
+              departmentAPI.getEmployees(deptId, { status: 'active', per_page: 100 })
+                .catch(() => ({ data: { data: [] } }))
+            );
+            
+            const employeeResults = await Promise.all(employeePromises);
+            const seenIds = new Set();
+            
+            employeeResults.forEach(res => {
+              const employees = res.data?.data || res.data?.users || res.data || [];
+              employees.forEach(emp => {
+                if (!seenIds.has(emp.id)) {
+                  seenIds.add(emp.id);
+                  usersList.push(emp);
+                }
+              });
+            });
+          }
+        } else {
+          // Regular employee: use basic list
+          const usersRes = await api.get('/users/basic').catch(() => ({ data: { users: [] } }));
+          usersList = usersRes.data.users || [];
+        }
+      } catch (e) {
+        console.error('Error fetching users:', e);
+        // Fallback to basic list
+        const usersRes = await api.get('/users/basic').catch(() => ({ data: { users: [] } }));
+        usersList = usersRes.data.users || [];
+      }
+      
+      // Ensure current user is included
+      if (!usersList.find(u => u.id === user?.id) && user) {
+        usersList.push({
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          department_id: user.department_id,
+          status: 'active'
+        });
+      }
+      
+      setUsers(usersList);
       
     } catch (error) {
       console.error('Error fetching task details:', error);
       if (error.response?.status === 404) {
-        alert('Task not found');
+        toast.error('Task not found');
       } else {
-        alert('Failed to fetch task details');
+        toast.error('Failed to fetch task details');
       }
       navigate('/dashboard/tasks');
     } finally {
@@ -121,7 +189,7 @@ const TaskDetails = () => {
       
     } catch (error) {
       console.error('Error adding comment:', error);
-      alert(error.response?.data?.message || 'Failed to add comment');
+      toast.error(error.response?.data?.message || 'Failed to add comment');
     }
   };
 
@@ -136,7 +204,7 @@ const TaskDetails = () => {
       setComments(response.data.data?.comments || response.data.comments || []);
     } catch (error) {
       console.error('Error editing comment:', error);
-      alert(error.response?.data?.message || 'Failed to edit comment');
+      toast.error(error.response?.data?.message || 'Failed to edit comment');
     }
   };
 
@@ -149,7 +217,7 @@ const TaskDetails = () => {
       setComments(response.data.data?.comments || response.data.comments || []);
     } catch (error) {
       console.error('Error deleting comment:', error);
-      alert(error.response?.data?.message || 'Failed to delete comment');
+      toast.error(error.response?.data?.message || 'Failed to delete comment');
     }
   };
 
@@ -167,7 +235,7 @@ const TaskDetails = () => {
   const handleAddLink = async (e) => {
     e.preventDefault();
     if (!linkForm.title.trim() || !linkForm.url.trim()) {
-      alert('Title and URL are required');
+      toast.warning('Title and URL are required');
       return;
     }
 
@@ -188,7 +256,7 @@ const TaskDetails = () => {
       setEditingLink(null);
     } catch (error) {
       console.error('Error saving link:', error);
-      alert(error.response?.data?.message || 'Failed to save link');
+      toast.error(error.response?.data?.message || 'Failed to save link');
     }
   };
 
@@ -203,7 +271,14 @@ const TaskDetails = () => {
   };
 
   const handleDeleteLink = async (linkId) => {
-    if (!confirm('Delete this link?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Link',
+      message: 'Are you sure you want to delete this link?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await api.delete(`/links/${linkId}`);
@@ -211,9 +286,10 @@ const TaskDetails = () => {
       // Refresh links
       const response = await api.get(`/tasks/${id}/links`);
       setLinks(response.data.data?.links || response.data.links || []);
+      toast.success('Link deleted');
     } catch (error) {
       console.error('Error deleting link:', error);
-      alert(error.response?.data?.message || 'Failed to delete link');
+      toast.error(error.response?.data?.message || 'Failed to delete link');
     }
   };
 
@@ -245,14 +321,21 @@ const TaskDetails = () => {
       e.target.value = '';
     } catch (error) {
       console.error('Error uploading file:', error);
-      alert(error.response?.data?.message || 'Failed to upload file');
+      toast.error(error.response?.data?.message || 'Failed to upload file');
     } finally {
       setUploadingFile(false);
     }
   };
 
   const handleDeleteAttachment = async (attachmentId) => {
-    if (!window.confirm('Are you sure you want to delete this attachment?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Attachment',
+      message: 'Are you sure you want to delete this attachment?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await api.delete(`/tasks/${id}/attachments/${attachmentId}`);
@@ -260,9 +343,10 @@ const TaskDetails = () => {
       // Refresh attachments
       const response = await api.get(`/tasks/${id}/attachments`);
       setAttachments(response.data.data?.attachments || []);
+      toast.success('Attachment deleted');
     } catch (error) {
       console.error('Error deleting attachment:', error);
-      alert(error.response?.data?.message || 'Failed to delete attachment');
+      toast.error(error.response?.data?.message || 'Failed to delete attachment');
     }
   };
 
@@ -282,7 +366,7 @@ const TaskDetails = () => {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading attachment:', error);
-      alert('Failed to download attachment');
+      toast.error('Failed to download attachment');
     }
   };
 
@@ -330,9 +414,10 @@ const TaskDetails = () => {
     }
   };
 
-  // Quick update progress for employees (without full form submission)
+  // Quick update progress for employees and senior employees assigned to the task (without full form submission)
   const handleQuickProgressUpdate = async () => {
-    if (user?.role !== 'employee') return;
+    // Allow employees and senior employees who are assigned to the task
+    if (user?.role !== 'employee' && user?.role !== 'senior_employee') return;
     
     try {
       const updatePayload = {
@@ -349,10 +434,10 @@ const TaskDetails = () => {
       
       // Success feedback
       const successMsg = `Progress updated to ${formData.progress}%!${statusChangedMessage}`;
-      alert(successMsg);
+      toast.success(successMsg);
     } catch (error) {
       console.error('Error updating progress:', error);
-      alert(error.response?.data?.message || 'Failed to update progress');
+      toast.error(error.response?.data?.message || 'Failed to update progress');
     }
   };
 
@@ -368,7 +453,7 @@ const TaskDetails = () => {
           progress: formData.progress
         };
       } else {
-        // Admins and dept_admins can update all fields
+        // Admins and HODs can update all fields
         updatePayload = {
           title: formData.title,
           description: formData.description,
@@ -399,7 +484,7 @@ const TaskDetails = () => {
       await api.put(`/tasks/${id}`, updatePayload);
       await fetchTaskDetails();
       setIsEditing(false);
-      alert(`Task updated successfully!${statusChangedMessage}`);
+      toast.success(`Task updated successfully!${statusChangedMessage}`);
     } catch (error) {
       console.error('Error updating task:', error);
       console.error('Error response:', error.response?.data);
@@ -407,22 +492,27 @@ const TaskDetails = () => {
       
       // Show detailed error message
       const errorMsg = error.response?.data?.errors?.[0]?.msg || error.response?.data?.message || 'Failed to update task';
-      alert(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this task?')) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      title: 'Delete Task',
+      message: 'Are you sure you want to delete this task? This action cannot be undone.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await api.delete(`/tasks/${id}`);
-      alert('Task deleted successfully');
+      toast.success('Task deleted successfully');
       navigate('/dashboard/tasks');
     } catch (error) {
       console.error('Error deleting task:', error);
-      alert(error.response?.data?.message || 'Failed to delete task');
+      toast.error(error.response?.data?.message || 'Failed to delete task');
     }
   };
 
@@ -497,8 +587,8 @@ const TaskDetails = () => {
     <div className="space-y-6">
       {/* Add/Edit Link Modal */}
       {showAddLinkModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full sm:max-w-lg p-5 sm:p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">
                 {editingLink ? 'Edit Link' : 'Add New Link'}
@@ -578,22 +668,42 @@ const TaskDetails = () => {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Task Details</h1>
-            <p className="text-gray-600 mt-1">View and manage task information</p>
+          <div className="min-w-0">
+            {task?.parent_task_id ? (
+              <>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
+                    Sub-task
+                  </span>
+                  <span className="text-gray-400 hidden sm:inline">of</span>
+                  <button
+                    onClick={() => navigate(`/dashboard/tasks/${task.parent_task_id}`)}
+                    className="text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium truncate max-w-[150px] sm:max-w-none"
+                  >
+                    {task.parent_task?.title || `Task #${task.parent_task_id}`}
+                  </button>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">{task?.title}</h1>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Task Details</h1>
+                <p className="text-sm sm:text-base text-gray-600 mt-1">View and manage task information</p>
+              </>
+            )}
           </div>
         </div>
-        <div className="flex gap-2">
-          {/* Edit button - Only for admins */}
-          {!isEditing && (user?.role === 'super_admin' || user?.role === 'dept_admin') && (
+        <div className="flex gap-2 ml-10 sm:ml-0">
+          {/* Edit button - For admins, HODs, and senior employees */}
+          {!isEditing && (user?.role === 'admin' || user?.role === 'hod' || user?.role === 'senior_employee') && (
             <>
               <button
                 onClick={() => setIsEditing(true)}
@@ -602,7 +712,7 @@ const TaskDetails = () => {
                 <Edit2 className="w-4 h-4" />
                 Edit
               </button>
-              {(user?.role === 'super_admin' || user?.id === task.created_by_id) && (
+              {(user?.role === 'admin' || user?.role === 'senior_employee' || user?.id === task.created_by_id) && (
                 <button
                   onClick={handleDelete}
                   className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
@@ -616,73 +726,92 @@ const TaskDetails = () => {
         </div>
       </div>
 
-      {/* Enhanced Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="flex gap-4">
+      {/* Enhanced Tabs - Horizontally scrollable on mobile */}
+      <div className="border-b border-gray-200 -mx-4 sm:mx-0">
+        <nav className="flex gap-1 sm:gap-4 overflow-x-auto scrollbar-hide px-4 sm:px-0 pb-px">
           <button
             onClick={() => setActiveTab('details')}
-            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
               activeTab === 'details'
                 ? 'border-red-600 text-red-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            <FileText className="w-4 h-4 inline mr-1" />
-            Details
+            <FileText className="w-4 h-4" />
+            <span className="hidden sm:inline">Details</span>
+            <span className="sm:hidden">Info</span>
           </button>
           <button
             onClick={() => setActiveTab('worklogs')}
-            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
               activeTab === 'worklogs'
                 ? 'border-red-600 text-red-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            <ClipboardList className="w-4 h-4 inline mr-1" />
-            Work Logs ({workLogs.length})
+            <ClipboardList className="w-4 h-4" />
+            <span className="hidden sm:inline">Work Logs</span>
+            <span className="sm:hidden">Logs</span>
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-xs">{workLogs.length}</span>
           </button>
           <button
             onClick={() => setActiveTab('comments')}
-            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
               activeTab === 'comments'
                 ? 'border-red-600 text-red-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            <MessageSquare className="w-4 h-4 inline mr-1" />
-            Comments ({comments.length})
+            <MessageSquare className="w-4 h-4" />
+            <span className="hidden sm:inline">Comments</span>
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-xs">{comments.length}</span>
           </button>
           <button
             onClick={() => setActiveTab('attachments')}
-            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
               activeTab === 'attachments'
                 ? 'border-red-600 text-red-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            <Paperclip className="w-4 h-4 inline mr-1" />
-            Files ({attachments.length})
+            <Paperclip className="w-4 h-4" />
+            <span className="hidden sm:inline">Files</span>
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-xs">{attachments.length}</span>
           </button>
           <button
             onClick={() => setActiveTab('links')}
-            className={`px-4 py-2 border-b-2 font-medium transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
               activeTab === 'links'
                 ? 'border-red-600 text-red-600'
                 : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
-            <Link className="w-4 h-4 inline mr-1" />
-            Links ({links.length})
+            <Link className="w-4 h-4" />
+            <span className="hidden sm:inline">Links</span>
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-xs">{links.length}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('subtasks')}
+            className={`px-3 sm:px-4 py-2.5 sm:py-2 border-b-2 font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center gap-1.5 flex-shrink-0 ${
+              activeTab === 'subtasks'
+                ? 'border-red-600 text-red-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <ListTodo className="w-4 h-4" />
+            <span className="hidden sm:inline">Sub-tasks</span>
+            <span className="sm:hidden">Sub</span>
+            <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full text-xs">{subtasks.length}</span>
           </button>
         </nav>
       </div>
 
       {/* Content */}
       {activeTab === 'details' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* Main Details */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="lg:col-span-2 order-2 lg:order-1">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
               {isEditing ? (
                 <form onSubmit={handleUpdate}>
                   <div className="space-y-4">
@@ -773,7 +902,7 @@ const TaskDetails = () => {
                     </div>
 
                     {/* Progress Slider - Only for assigned employees */}
-                    {(user?.role === 'employee' && user?.id === task.assigned_to_id) && (
+                    {(user?.role === 'employee' && Number(user?.id) === Number(task.assigned_to_id)) && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
                           <span className="flex items-center gap-2">
@@ -857,15 +986,15 @@ const TaskDetails = () => {
                   </div>
                 </form>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-4 sm:space-y-6">
                   {/* Title */}
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">{task.title}</h2>
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3">{task.title}</h2>
                     <div className="flex flex-wrap gap-2">
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(task.status)}`}>
+                      <span className={`px-2.5 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium border ${getStatusColor(task.status)}`}>
                         {task.status?.replace('-', ' ').toUpperCase()}
                       </span>
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getPriorityColor(task.priority)}`}>
+                      <span className={`px-2.5 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium border ${getPriorityColor(task.priority)}`}>
                         {task.priority?.toUpperCase()} PRIORITY
                       </span>
                     </div>
@@ -886,27 +1015,49 @@ const TaskDetails = () => {
             </div>
           </div>
 
-          {/* Enhanced Sidebar */}
-          <div className="lg:col-span-1 space-y-4">
-            {/* Employee Progress Update Card */}
-            {!isEditing && user?.role === 'employee' && user?.id === task.assigned_to_id && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg shadow-sm border-2 border-blue-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+          {/* Enhanced Sidebar - Shows first on mobile */}
+          <div className="lg:col-span-1 space-y-4 order-1 lg:order-2">
+            {/* Employee Progress Update Card - Also shown to senior employees when assigned */}
+            {!isEditing && (user?.role === 'employee' || user?.role === 'senior_employee') && Number(user?.id) === Number(task.assigned_to_id) && (
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl shadow-sm border-2 border-blue-200 p-4 sm:p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-sm sm:text-base">
                     <Percent className="w-5 h-5 text-blue-600" />
                     Update Progress
                   </h3>
-                  <span className="text-2xl font-bold text-blue-600">{formData.progress || 0}%</span>
+                  <span className="text-xl sm:text-2xl font-bold text-blue-600">{formData.progress || 0}%</span>
                 </div>
+                
+                {/* Mobile-friendly quick progress buttons */}
+                <div className="flex flex-wrap gap-2 mb-3 sm:hidden">
+                  {[0, 25, 50, 75, 100].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => handleProgressChange(val)}
+                      className={`flex-1 min-w-[50px] px-2 py-2 text-sm font-medium rounded-lg transition-colors ${
+                        formData.progress === val
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {val}%
+                    </button>
+                  ))}
+                </div>
+                
+                {/* Range slider - better on desktop */}
                 <input
                   type="range"
                   min="0"
                   max="100"
+                  step="5"
                   value={formData.progress || 0}
                   onChange={(e) => handleProgressChange(parseInt(e.target.value))}
-                  className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer mb-2"
+                  className="w-full h-4 sm:h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer mb-2 touch-pan-x"
                   style={{
-                    background: `linear-gradient(to right, #2563EB 0%, #2563EB ${formData.progress || 0}%, #E5E7EB ${formData.progress || 0}%, #E5E7EB 100%)`
+                    background: `linear-gradient(to right, #2563EB 0%, #2563EB ${formData.progress || 0}%, #E5E7EB ${formData.progress || 0}%, #E5E7EB 100%)`,
+                    WebkitAppearance: 'none'
                   }}
                 />
                 <div className="flex justify-between text-xs text-gray-500 mb-3">
@@ -914,6 +1065,28 @@ const TaskDetails = () => {
                   <span>50%</span>
                   <span>100%</span>
                 </div>
+                
+                {/* Fine-tune buttons for mobile */}
+                <div className="flex items-center justify-center gap-3 mb-3 sm:hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleProgressChange(Math.max(0, (formData.progress || 0) - 5))}
+                    disabled={formData.progress <= 0}
+                    className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    -5%
+                  </button>
+                  <span className="text-lg font-bold text-blue-600 min-w-[50px] text-center">{formData.progress || 0}%</span>
+                  <button
+                    type="button"
+                    onClick={() => handleProgressChange(Math.min(100, (formData.progress || 0) + 5))}
+                    disabled={formData.progress >= 100}
+                    className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    +5%
+                  </button>
+                </div>
+                
                 <div className="mb-3">
                   <span className={`px-3 py-1.5 rounded-full text-xs font-semibold inline-block ${
                     formData.status === 'completed' ? 'bg-green-100 text-green-800' :
@@ -929,7 +1102,7 @@ const TaskDetails = () => {
                 {(formData.progress !== task.progress || formData.status !== task.status) && (
                   <button
                     onClick={handleQuickProgressUpdate}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium shadow-sm text-base sm:text-sm"
                   >
                     <Save className="w-4 h-4" />
                     Save Progress
@@ -939,9 +1112,9 @@ const TaskDetails = () => {
             )}
             
             {/* Task Info */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-              <h3 className="font-semibold text-gray-900 mb-4">Task Information</h3>
-              <div className="space-y-3">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-5">
+              <h3 className="font-semibold text-gray-900 mb-4 text-sm sm:text-base">Task Information</h3>
+              <div className="space-y-3 sm:space-y-4">
                 <div className="flex items-start gap-3">
                   <Calendar className="w-5 h-5 text-gray-400 mt-0.5" />
                   <div className="flex-1">
@@ -1016,17 +1189,17 @@ const TaskDetails = () => {
 
       {/* Comments Tab */}
       {activeTab === 'comments' && (
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 p-6 md:p-8">
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-            <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-xl">
-                <MessageSquare className="w-6 h-6 text-blue-600" />
+        <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-6 md:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6 pb-4 border-b border-gray-200">
+            <h3 className="text-lg sm:text-2xl font-bold text-gray-900 flex items-center gap-2 sm:gap-3">
+              <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg sm:rounded-xl">
+                <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
               </div>
               Comments
             </h3>
             {comments.length > 0 && (
               <div className="flex items-center gap-2">
-                <span className="px-3 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-full shadow-sm">
+                <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-blue-600 text-white text-xs sm:text-sm font-semibold rounded-full shadow-sm">
                   {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
                 </span>
               </div>
@@ -1087,22 +1260,22 @@ const TaskDetails = () => {
 
       {/* Attachments Tab */}
       {activeTab === 'attachments' && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
           {/* Header Section */}
-          <div className="border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-6">
-            <div className="flex items-center justify-between">
+          <div className="border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm">
-                  <Paperclip className="w-6 h-6 text-white" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+                  <Paperclip className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900">Files & Attachments</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Upload and manage task-related documents and files
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">Files & Attachments</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-0.5 sm:mt-1">
+                    Upload and manage task-related files
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 w-full sm:w-auto">
                 <input
                   type="file"
                   id="file-upload"
@@ -1112,18 +1285,18 @@ const TaskDetails = () => {
                 />
                 <label
                   htmlFor="file-upload"
-                  className={`flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-sm hover:shadow-md font-medium ${
+                  className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-sm hover:shadow-md font-medium text-sm sm:text-base w-full sm:w-auto ${
                     uploadingFile ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                   }`}
                 >
                   {uploadingFile ? (
                     <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-white"></div>
                       <span>Uploading...</span>
                     </>
                   ) : (
                     <>
-                      <Upload className="w-5 h-5" />
+                      <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
                       <span>Upload File</span>
                     </>
                   )}
@@ -1134,19 +1307,19 @@ const TaskDetails = () => {
           </div>
 
           {/* Content Section */}
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {attachments.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full mb-4">
-                  <Paperclip className="w-12 h-12 text-gray-400" />
+              <div className="text-center py-10 sm:py-16">
+                <div className="inline-flex items-center justify-center w-16 h-16 sm:w-24 sm:h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full mb-4">
+                  <Paperclip className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400" />
                 </div>
-                <h4 className="text-lg font-semibold text-gray-900 mb-2">No files uploaded yet</h4>
-                <p className="text-gray-500 mb-4">Upload documents, images, or other files to share with your team</p>
+                <h4 className="text-base sm:text-lg font-semibold text-gray-900 mb-2">No files uploaded yet</h4>
+                <p className="text-sm text-gray-500 mb-4 px-4">Upload documents, images, or other files to share with your team</p>
                 <label
                   htmlFor="file-upload"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer font-medium"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 sm:px-6 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer font-medium text-sm sm:text-base"
                 >
-                  <Upload className="w-5 h-5" />
+                  <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
                   Upload Your First File
                 </label>
               </div>
@@ -1157,7 +1330,7 @@ const TaskDetails = () => {
                     <span className="font-semibold text-gray-900">{attachments.length}</span> file{attachments.length !== 1 ? 's' : ''} attached
                   </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                   {attachments.map((attachment) => (
                     <div 
                       key={attachment.id} 
@@ -1176,8 +1349,8 @@ const TaskDetails = () => {
                           >
                             <Download className="w-5 h-5" />
                           </button>
-                          {(user?.role === 'super_admin' || 
-                            user?.role === 'dept_admin' || 
+                          {(user?.role === 'admin' || 
+                            user?.role === 'hod' || 
                             attachment.uploaded_by === user?.id ||
                             task?.created_by_id === user?.id) && (
                             <button
@@ -1229,26 +1402,26 @@ const TaskDetails = () => {
 
       {/* Links Tab */}
       {activeTab === 'links' && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
           {/* Header Section */}
-          <div className="border-b border-gray-200 bg-gradient-to-r from-green-50 to-teal-50 p-6">
-            <div className="flex items-center justify-between">
+          <div className="border-b border-gray-200 bg-gradient-to-r from-green-50 to-teal-50 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center shadow-sm">
-                  <Link className="w-6 h-6 text-white" />
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-600 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+                  <Link className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900">Task Links</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Useful links and resources for this task
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">Task Links</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-0.5 sm:mt-1">
+                    Useful links and resources
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowAddLinkModal(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all shadow-sm hover:shadow-md font-medium"
+                className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all shadow-sm hover:shadow-md font-medium text-sm sm:text-base w-full sm:w-auto"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                 Add Link
               </button>
             </div>
@@ -1292,17 +1465,23 @@ const TaskDetails = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                               <a
-                                href={link.url}
+                                href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="font-semibold text-gray-900 hover:text-green-600 transition-colors block truncate"
+                                className="font-semibold text-green-600 hover:text-green-800 hover:underline transition-colors block truncate"
                                 title={link.title}
                               >
                                 {link.title}
                               </a>
-                              <p className="text-xs text-gray-500 truncate mt-1" title={link.url}>
+                              <a 
+                                href={link.url.startsWith('http') ? link.url : `https://${link.url}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-500 hover:text-blue-700 hover:underline truncate mt-1 block"
+                                title={link.url}
+                              >
                                 {link.url}
-                              </p>
+                              </a>
                               {link.description && (
                                 <p className="text-sm text-gray-600 mt-2">
                                   {link.description}
@@ -1317,8 +1496,8 @@ const TaskDetails = () => {
                           </div>
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
-                          {(user?.role === 'super_admin' || 
-                            user?.role === 'dept_admin' || 
+                          {(user?.role === 'admin' || 
+                            user?.role === 'hod' || 
                             link.added_by === user?.id) && (
                             <>
                               <button
@@ -1350,14 +1529,14 @@ const TaskDetails = () => {
 
       {/* Work Logs Tab */}
       {activeTab === 'worklogs' && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-gray-800">Daily Work Logs</h3>
-            {/* Only task assignee can log work - dept_admin and super_admin can only view */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-800">Daily Work Logs</h3>
+            {/* Only task assignee can log work - admin and hod can only view */}
             {task?.assigned_to_id === user?.id && (
               <button
                 onClick={() => setShowWorkLogModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm sm:text-base w-full sm:w-auto"
               >
                 <Plus className="w-4 h-4" />
                 Log Work
@@ -1366,20 +1545,20 @@ const TaskDetails = () => {
           </div>
 
           {/* Work Logs Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-blue-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600">{workLogs.length}</div>
-              <div className="text-xs text-blue-700">Total Logs</div>
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4 sm:mb-6">
+            <div className="bg-blue-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-blue-600">{workLogs.length}</div>
+              <div className="text-[10px] sm:text-xs text-blue-700">Total Logs</div>
             </div>
-            <div className="bg-green-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-green-600">
+            <div className="bg-green-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-green-600">
                 {workLogs.reduce((sum, log) => sum + (parseFloat(log.hours_worked) || 0), 0).toFixed(1)}h
               </div>
-              <div className="text-xs text-green-700">Total Hours</div>
+              <div className="text-[10px] sm:text-xs text-green-700">Total Hours</div>
             </div>
-            <div className="bg-purple-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-purple-600">{task?.progress || 0}%</div>
-              <div className="text-xs text-purple-700">Progress</div>
+            <div className="bg-purple-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-purple-600">{task?.progress || 0}%</div>
+              <div className="text-[10px] sm:text-xs text-purple-700">Progress</div>
             </div>
           </div>
 
@@ -1456,6 +1635,253 @@ const TaskDetails = () => {
             fetchTaskDetails();
           }}
         />
+      )}
+
+      {/* Sub-tasks Tab */}
+      {activeTab === 'subtasks' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-800">Sub-tasks</h3>
+            {(user?.role === 'admin' || user?.role === 'hod' || user?.role === 'senior_employee') && (
+              <button
+                onClick={() => {
+                  setSubtaskForm({
+                    title: '',
+                    description: '',
+                    priority: 'medium',
+                    due_date: '',
+                    assigned_to_id: ''
+                  });
+                  setShowAddSubtaskModal(true);
+                }}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base w-full sm:w-auto"
+              >
+                <Plus className="w-4 h-4" />
+                Add Sub-task
+              </button>
+            )}
+          </div>
+
+          {/* Subtasks Stats */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4 sm:mb-6">
+            <div className="bg-blue-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-blue-600">{subtasks.length}</div>
+              <div className="text-[10px] sm:text-xs text-blue-700">Total Sub-tasks</div>
+            </div>
+            <div className="bg-green-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-green-600">
+                {subtasks.filter(st => st.status === 'completed').length}
+              </div>
+              <div className="text-[10px] sm:text-xs text-green-700">Completed</div>
+            </div>
+            <div className="bg-yellow-50 rounded-lg p-3 sm:p-4 text-center">
+              <div className="text-lg sm:text-2xl font-bold text-yellow-600">
+                {subtasks.filter(st => st.status !== 'completed').length}
+              </div>
+              <div className="text-[10px] sm:text-xs text-yellow-700">In Progress</div>
+            </div>
+          </div>
+
+          {/* Subtasks List */}
+          {subtasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+              <ListTodo className="w-12 h-12 mb-2" />
+              <p>No sub-tasks yet</p>
+              {(user?.role === 'admin' || user?.role === 'hod' || user?.role === 'senior_employee') && (
+                <p className="text-sm">Click "Add Sub-task" to break down this task</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {subtasks.map(subtask => (
+                <div 
+                  key={subtask.id} 
+                  className={`border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer ${
+                    subtask.status === 'completed' ? 'bg-green-50 border-green-200' : 'bg-white'
+                  }`}
+                  onClick={() => navigate(`/dashboard/tasks/${subtask.id}`)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className={`mt-1 flex-shrink-0 ${
+                        subtask.status === 'completed' ? 'text-green-500' : 'text-gray-400'
+                      }`}>
+                        {subtask.status === 'completed' ? (
+                          <CheckCircle2 className="w-5 h-5" />
+                        ) : (
+                          <div className="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className={`font-medium ${
+                          subtask.status === 'completed' ? 'text-gray-500 line-through' : 'text-gray-900'
+                        }`}>
+                          {subtask.title}
+                        </h4>
+                        {subtask.description && (
+                          <p className="text-sm text-gray-500 mt-1 line-clamp-2">{subtask.description}</p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-3 mt-2">
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${
+                            subtask.priority === 'high' ? 'bg-red-100 text-red-700' :
+                            subtask.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {subtask.priority}
+                          </span>
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${
+                            subtask.status === 'completed' ? 'bg-green-100 text-green-700' :
+                            subtask.status === 'in-progress' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {subtask.status}
+                          </span>
+                          {subtask.due_date && (
+                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                              <Calendar className="w-3 h-3" />
+                              {format(new Date(subtask.due_date), 'MMM dd')}
+                            </span>
+                          )}
+                          {subtask.assigned_to_name && (
+                            <span className="flex items-center gap-1 text-xs text-gray-500">
+                              <User className="w-3 h-3" />
+                              {subtask.assigned_to_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Progress indicator */}
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500 mb-1">{subtask.progress || 0}%</div>
+                        <div className="w-16 bg-gray-200 rounded-full h-1.5">
+                          <div 
+                            className={`h-1.5 rounded-full ${
+                              subtask.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'
+                            }`}
+                            style={{ width: `${subtask.progress || 0}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add Subtask Modal */}
+      {showAddSubtaskModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl p-5 sm:p-6 w-full sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Add Sub-task</h2>
+              <button 
+                onClick={() => setShowAddSubtaskModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                await taskAPI.createSubtask(id, subtaskForm);
+                setShowAddSubtaskModal(false);
+                toast.success('Sub-task created successfully');
+                // Refresh subtasks
+                const response = await taskAPI.getSubtasks(id);
+                setSubtasks(response.data.subtasks || []);
+              } catch (error) {
+                console.error('Error creating subtask:', error);
+                toast.error(error.response?.data?.message || 'Failed to create subtask');
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Title *</label>
+                <input
+                  type="text"
+                  value={subtaskForm.title}
+                  onChange={(e) => setSubtaskForm({ ...subtaskForm, title: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter sub-task title"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  value={subtaskForm.description}
+                  onChange={(e) => setSubtaskForm({ ...subtaskForm, description: e.target.value })}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Describe what needs to be done"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Priority *</label>
+                  <select
+                    value={subtaskForm.priority}
+                    onChange={(e) => setSubtaskForm({ ...subtaskForm, priority: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Due Date</label>
+                  <input
+                    type="date"
+                    value={subtaskForm.due_date}
+                    onChange={(e) => setSubtaskForm({ ...subtaskForm, due_date: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Assign To</label>
+                <select
+                  value={subtaskForm.assigned_to_id}
+                  onChange={(e) => setSubtaskForm({ ...subtaskForm, assigned_to_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Unassigned</option>
+                  {users.filter(u => u.status === 'active').map(u => (
+                    <option key={u.id} value={u.id}>{u.username || u.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowAddSubtaskModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Create Sub-task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

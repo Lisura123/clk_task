@@ -22,15 +22,30 @@ class TaskController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $query = Task::with(['assignedTo', 'createdBy', 'tags', 'watchers']);
+        $query = Task::with(['assignedTo', 'createdBy', 'tags', 'watchers', 'subtasks']);
+
+        // By default, only show parent tasks (not subtasks) unless specifically requested
+        if (!$request->boolean('include_subtasks')) {
+            $query->whereNull('parent_task_id');
+        }
 
         // Role-based filtering
-        if ($user->isEmployee()) {
+        // Admins can see all tasks
+        // HODs can see tasks in their managed departments
+        // All employees (including senior employees) can only see tasks related to them
+        if ($user->isEmployee() || $user->isSeniorEmployee()) {
+            // All employees can only see tasks they're involved in:
+            // - Assigned to them
+            // - Created by them
+            // - Watching/collaborating on
             $query->where(function ($q) use ($user) {
                 $q->where('assigned_to_id', $user->id)
-                  ->orWhere('created_by_id', $user->id);
+                  ->orWhere('created_by_id', $user->id)
+                  ->orWhereHas('watchers', function ($wq) use ($user) {
+                      $wq->where('user_id', $user->id);
+                  });
             });
-        } elseif ($user->isDeptAdmin()) {
+        } elseif ($user->isHod()) {
             $managedDepts = $user->managed_department_ids ?? [];
             
             // Fallback to user's department_id if managed_department_ids is empty
@@ -147,6 +162,7 @@ class TaskController extends Controller
             'status' => 'sometimes|in:todo,in-progress,completed,on-hold',
             'due_date' => 'nullable|date',
             'estimated_hours' => 'nullable|numeric|min:0',
+            'parent_task_id' => 'nullable|exists:tasks,id',
         ]);
 
         if ($validator->fails()) {
@@ -155,24 +171,15 @@ class TaskController extends Controller
 
         $user = $request->user();
 
-        // Check permissions
-        if ($user->isEmployee()) {
+        // Check permissions - only regular employees cannot create tasks
+        // Admin, HOD, and Senior Employee can all create tasks across departments
+        if ($user->isEmployee() && !$user->isSeniorEmployee()) {
             return response()->json(['message' => 'Employees cannot create tasks'], 403);
         }
 
-        // For dept_admin, verify they manage this department
-        if ($user->isDeptAdmin()) {
-            $canManage = $user->managesDepartment($data['department']);
-            if (!$canManage) {
-                \Log::warning('Dept admin permission denied', [
-                    'user_id' => $user->id,
-                    'department' => $data['department'],
-                    'managed_ids' => $user->managed_department_ids
-                ]);
-                return response()->json(['message' => 'You cannot create tasks for this department'], 403);
-            }
-        }
-
+        // HODs and Senior Employees can create tasks across ALL departments
+        // No department restriction for task creation
+        
         $task = Task::create([
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
@@ -184,6 +191,7 @@ class TaskController extends Controller
             'due_date' => $data['due_date'] ?? null,
             'estimated_hours' => $data['estimated_hours'] ?? null,
             'progress' => 0,
+            'parent_task_id' => $data['parent_task_id'] ?? null,
         ]);
 
         // Create notification for assigned user
@@ -229,6 +237,8 @@ class TaskController extends Controller
             'timeEntries.user',
             'watchers.user',
             'tags',
+            'parentTask',
+            'subtasks.assignedTo',
         ])->findOrFail($id);
 
         $user = $request->user();
@@ -249,12 +259,13 @@ class TaskController extends Controller
         $task = Task::findOrFail($id);
         $user = $request->user();
 
-        // Check permissions
-        if ($user->isEmployee() && $task->assigned_to_id !== $user->id) {
+        // Check permissions - Senior employees can update any task
+        // Use loose comparison (!=) to handle integer/string type differences
+        if ($user->isEmployee() && !$user->isSeniorEmployee() && $task->assigned_to_id != $user->id) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if ($user->isDeptAdmin() && !$user->managesDepartment($task->department)) {
+        if ($user->isHod() && !$user->managesDepartment($task->department)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -385,7 +396,8 @@ class TaskController extends Controller
         $user = $request->user();
         $query = Task::query();
 
-        if ($user->isEmployee()) {
+        // Employees and Senior Employees see only tasks assigned to them
+        if ($user->isEmployee() || $user->isSeniorEmployee()) {
             $query->where('assigned_to_id', $user->id);
         } elseif ($user->isDeptAdmin()) {
             $managedDepts = $user->managed_department_ids ?? [];
@@ -453,7 +465,7 @@ class TaskController extends Controller
             
             // Count employees in managed departments (only active employees, exclude super_admin)
             $totalEmployees = User::where('status', 'active')
-                ->where('role', '!=', 'super_admin')
+                ->where('role', '!=', 'admin')
                 ->whereIn('department', $deptNames)
                 ->count();
             
@@ -484,7 +496,7 @@ class TaskController extends Controller
             $stats['users'] = [
                 'total' => User::where('status', '!=', 'pending')->count(),
                 'active' => User::where('status', 'active')->count(),
-                'departmentAdmins' => User::where('role', 'dept_admin')->where('status', '!=', 'pending')->count(),
+                'departmentAdmins' => User::where('role', 'hod')->where('status', '!=', 'pending')->count(),
             ];
             $stats['totalDepartments'] = Department::count();
         }
@@ -625,6 +637,32 @@ class TaskController extends Controller
 
             \Log::info('Attachment created: ' . $attachment->id);
 
+            // Create notification for task assignee
+            if ($task->assigned_to_id && $task->assigned_to_id !== $user->id) {
+                Notification::create([
+                    'user_id' => $task->assigned_to_id,
+                    'triggered_by_id' => $user->id,
+                    'type' => 'file_added',
+                    'title' => 'New File Uploaded to Task',
+                    'message' => $user->name . " uploaded a file to task: {$task->title}",
+                    'task_id' => $task->id,
+                ]);
+            }
+
+            // Also notify task creator if different
+            if ($task->created_by_id && 
+                $task->created_by_id !== $user->id && 
+                $task->created_by_id !== $task->assigned_to_id) {
+                Notification::create([
+                    'user_id' => $task->created_by_id,
+                    'triggered_by_id' => $user->id,
+                    'type' => 'file_added',
+                    'title' => 'New File Uploaded to Task',
+                    'message' => $user->name . " uploaded a file to task: {$task->title}",
+                    'task_id' => $task->id,
+                ]);
+            }
+
             return response()->json([
                 'message' => 'File uploaded successfully',
                 'attachment' => $attachment
@@ -700,18 +738,116 @@ class TaskController extends Controller
      */
     private function userCanAccessTask($user, $task)
     {
-        if ($user->isSuperAdmin()) {
+        // Admins can access all tasks
+        if ($user->isAdmin()) {
             return true;
         }
 
+        // Senior employees can access all tasks (cross-department access)
+        if ($user->isSeniorEmployee()) {
+            return true;
+        }
+
+        // Regular employees can only access tasks assigned to them or created by them
         if ($user->isEmployee()) {
             return $task->assigned_to_id === $user->id || $task->created_by_id === $user->id;
         }
 
-        if ($user->isDeptAdmin()) {
+        // HODs can access tasks in their managed departments
+        if ($user->isHod()) {
             return $user->managesDepartment($task->department);
         }
 
         return false;
+    }
+
+    /**
+     * Get subtasks for a specific task
+     */
+    public function getSubtasks(Request $request, $id)
+    {
+        $task = Task::findOrFail($id);
+        $user = $request->user();
+
+        // Check permissions
+        if (!$this->userCanAccessTask($user, $task)) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $subtasks = $task->subtasks()
+            ->with(['assignedTo', 'createdBy'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'subtasks' => $subtasks,
+            'parent_task' => [
+                'id' => $task->id,
+                'title' => $task->title,
+            ],
+        ]);
+    }
+
+    /**
+     * Create a subtask for a specific task
+     */
+    public function createSubtask(Request $request, $id)
+    {
+        $parentTask = Task::findOrFail($id);
+        $user = $request->user();
+
+        // Check permissions - only regular employees cannot create subtasks
+        // Admin, HOD, and Senior Employee can all create subtasks across departments
+        if ($user->isEmployee() && !$user->isSeniorEmployee()) {
+            return response()->json(['message' => 'Employees cannot create subtasks'], 403);
+        }
+
+        // HODs and Senior Employees can create subtasks across ALL departments
+        // No department restriction for subtask creation
+
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'assigned_to_id' => 'nullable|exists:users,id',
+            'priority' => 'required|in:low,medium,high',
+            'status' => 'sometimes|in:todo,in-progress,completed,on-hold',
+            'due_date' => 'nullable|date',
+            'estimated_hours' => 'nullable|numeric|min:0',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $subtask = Task::create([
+            'title' => $request->title,
+            'description' => $request->description ?? null,
+            'department' => $parentTask->department, // Inherit department from parent
+            'assigned_to_id' => $request->assigned_to_id ?? null,
+            'created_by_id' => $user->id,
+            'priority' => $request->priority,
+            'status' => $request->status ?? 'todo',
+            'due_date' => $request->due_date ?? null,
+            'estimated_hours' => $request->estimated_hours ?? null,
+            'progress' => 0,
+            'parent_task_id' => $parentTask->id,
+        ]);
+
+        // Create notification for assigned user
+        if ($subtask->assigned_to_id) {
+            Notification::create([
+                'user_id' => $subtask->assigned_to_id,
+                'triggered_by_id' => $user->id,
+                'type' => 'task_assigned',
+                'title' => 'New Subtask Assigned',
+                'message' => "You have been assigned a subtask: {$subtask->title} (for task: {$parentTask->title})",
+                'task_id' => $subtask->id,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Subtask created successfully',
+            'subtask' => $subtask->load(['assignedTo', 'createdBy']),
+        ], 201);
     }
 }

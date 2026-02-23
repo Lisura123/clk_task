@@ -2,7 +2,17 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
 import api from '../services/api';
-import { UserPlus, AlertCircle, CheckCircle, User, Mail, Phone, Building, Lock, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, AlertCircle, CheckCircle, User, Mail, Phone, Building, Lock, Eye, EyeOff, MapPin } from 'lucide-react';
+
+// CameraLK Branch locations
+const CAMERALK_BRANCHES = [
+  { id: 'colombo', name: 'CameraLK Colombo' },
+  { id: 'majestic', name: 'CameraLK Majestic City' },
+  { id: 'kandy', name: 'CameraLK Kandy' },
+  { id: 'jaffna', name: 'CameraLK Jaffna' },
+  { id: 'batticaloa', name: 'CameraLK Batticaloa' },
+  { id: 'tissamaharama', name: 'CameraLK Tissamaharama' },
+];
 
 export default function Register() {
   const navigate = useNavigate();
@@ -19,11 +29,25 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     department: '',
+    branch: '',
   });
 
   const [formErrors, setFormErrors] = useState({});
   const [departments, setDepartments] = useState([]);
   const [loadingDepartments, setLoadingDepartments] = useState(true);
+  
+  // Check if Sales department is selected
+  const isSalesDepartment = formData.department && formData.department.toLowerCase() === 'sales';
+  
+  // DEBUG: Log department changes
+  useEffect(() => {
+    console.log('DEBUG Register - Department changed:', {
+      department: formData.department,
+      departmentLower: formData.department?.toLowerCase(),
+      isSalesDepartment: isSalesDepartment,
+      branch: formData.branch
+    });
+  }, [formData.department, isSalesDepartment]);
 
   useEffect(() => {
     fetchDepartments();
@@ -97,6 +121,11 @@ export default function Register() {
       errors.department = 'Please select a department';
     }
 
+    // Showroom validation - required for Sales department
+    if (formData.department.toLowerCase() === 'sales' && !formData.branch) {
+      errors.branch = 'Please select a showroom location';
+    }
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -127,6 +156,7 @@ export default function Register() {
         password: '',
         confirmPassword: '',
         department: '',
+        branch: '',
       });
       
       // Redirect to login after 3 seconds
@@ -138,10 +168,20 @@ export default function Register() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value,
-    });
+    
+    // If department changes away from Sales, clear the branch
+    if (name === 'department' && value.toLowerCase() !== 'sales') {
+      setFormData({
+        ...formData,
+        [name]: value,
+        branch: '',
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value,
+      });
+    }
     
     // Clear field-specific error when user starts typing
     if (formErrors[name]) {
@@ -362,6 +402,46 @@ export default function Register() {
                 </p>
               )}
             </div>
+
+            {/* Showroom Field - Only shown for Sales department */}
+            {isSalesDepartment && (
+              <div>
+                <label htmlFor="branch" className="block text-sm font-semibold text-gray-700 mb-2">
+                  Showroom Location <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <MapPin className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <select
+                    id="branch"
+                    name="branch"
+                    required
+                    value={formData.branch}
+                    onChange={handleChange}
+                    className={`block w-full pl-12 pr-4 py-3.5 border-2 rounded-xl focus:ring-4 focus:ring-red-100 focus:border-red-500 focus:outline-none transition-all text-gray-900 ${
+                      formErrors.branch ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                  >
+                    <option value="">Select your showroom location</option>
+                    {CAMERALK_BRANCHES.map((branch) => (
+                      <option key={branch.id} value={branch.name}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {formErrors.branch && (
+                  <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {formErrors.branch}
+                  </p>
+                )}
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Sales staff must select their assigned showroom location
+                </p>
+              </div>
+            )}
 
             {/* Two Column Grid for Passwords */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -13,6 +13,7 @@ class ScheduledPlan extends Model
         'title',
         'description',
         'department_id',
+        'group_id',
         'created_by',
         'start_date',
         'end_date',
@@ -34,9 +35,35 @@ class ScheduledPlan extends Model
         return $this->belongsTo(Department::class);
     }
 
+    public function group()
+    {
+        return $this->belongsTo(Group::class);
+    }
+
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Get employees related to this plan
+     * If plan has a group, return group members
+     * Otherwise return department employees
+     */
+    public function getEmployeesAttribute()
+    {
+        if ($this->group_id && $this->relationLoaded('group') && $this->group) {
+            return $this->group->members;
+        }
+        
+        if ($this->department_id && $this->relationLoaded('department') && $this->department) {
+            return $this->department->users()
+                ->whereIn('role', ['employee', 'senior_employee', 'hod'])
+                ->where('status', 'active')
+                ->get();
+        }
+        
+        return collect([]);
     }
 
     public function dailyEntries()

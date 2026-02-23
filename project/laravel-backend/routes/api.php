@@ -15,7 +15,14 @@ use App\Http\Controllers\Api\GroupPlanController;
 use App\Http\Controllers\Api\GroupMessageController;
 use App\Http\Controllers\Api\DailyWorkLogController;
 use App\Http\Controllers\Api\ScheduledPlanController;
+use App\Http\Controllers\Api\LeaveController;
 use App\Http\Controllers\PlanDailyEntryController;
+use App\Http\Controllers\Api\WebPushController;
+use App\Http\Controllers\Api\AttendanceController;
+use App\Http\Controllers\Api\GpsAttendanceController;
+use App\Http\Controllers\Api\BranchController;
+use App\Http\Controllers\Api\AttendanceReportController;
+use App\Http\Controllers\Api\AttendanceCorrectionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,6 +59,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // User routes
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/basic', [UserController::class, 'basicList']);
+    Route::get('/users/{id}', [UserController::class, 'show']); // Get single user details
     Route::post('/users', [UserController::class, 'store']); // Admin only
     Route::put('/users/{id}', [UserController::class, 'update']); // Admin only
     Route::delete('/users/{id}', [UserController::class, 'destroy']); // Admin only
@@ -61,6 +69,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users/pending/registrations', [UserController::class, 'pendingRegistrations']);
     Route::post('/users/{id}/approve', [UserController::class, 'approve']);
     Route::post('/users/{id}/reject', [UserController::class, 'reject']);
+    
+    // Onboarding routes
+    Route::post('/users/onboarding-complete', [UserController::class, 'markOnboardingComplete']);
+    Route::post('/users/onboarding-reset', [UserController::class, 'resetOnboarding']);
 
     // Task routes
     Route::get('/tasks', [TaskController::class, 'index']);
@@ -76,6 +88,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tasks/{taskId}/attachments/{attachmentId}/download', [TaskController::class, 'downloadAttachment']);
     Route::delete('/tasks/{taskId}/attachments/{attachmentId}', [TaskController::class, 'deleteAttachment']);
     Route::get('/tasks/{id}/participants', [TaskController::class, 'getParticipants']);
+    Route::get('/tasks/{id}/subtasks', [TaskController::class, 'getSubtasks']);
+    Route::post('/tasks/{id}/subtasks', [TaskController::class, 'createSubtask']);
 
     // Comment routes
     Route::get('/tasks/{taskId}/comments', [CommentController::class, 'index']);
@@ -150,6 +164,143 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/{id}/unread', [NotificationController::class, 'markAsUnread']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/notifications/clear-read', [NotificationController::class, 'clearRead']); // Must be before {id} route
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
-    Route::delete('/notifications/clear-read', [NotificationController::class, 'clearRead']);
+
+    // Web Push routes
+    Route::get('/webpush/key', [WebPushController::class, 'getPublicKey']);
+    Route::post('/webpush/subscribe', [WebPushController::class, 'subscribe']);
+    Route::post('/webpush/unsubscribe', [WebPushController::class, 'unsubscribe']);
+    Route::post('/webpush/test', [WebPushController::class, 'test']);
+
+    // Leave Management routes
+    Route::get('/leave-types', [LeaveController::class, 'getLeaveTypes']);
+    Route::post('/leave-types', [LeaveController::class, 'createLeaveType']); // Super admin only
+    Route::put('/leave-types/{id}', [LeaveController::class, 'updateLeaveType']); // Super admin only
+    Route::delete('/leave-types/{id}', [LeaveController::class, 'deleteLeaveType']); // Super admin only
+
+    Route::get('/leave-balances', [LeaveController::class, 'getMyBalances']);
+    Route::get('/leave-balances/user/{userId}', [LeaveController::class, 'getUserBalances']); // Admin only
+    Route::put('/leave-balances/{balanceId}', [LeaveController::class, 'updateBalance']); // Admin only
+
+    Route::get('/leaves', [LeaveController::class, 'getAllLeaves']); // Admin only
+    Route::get('/leaves/my', [LeaveController::class, 'getMyLeaves']);
+    Route::get('/leaves/user/{userId}', [LeaveController::class, 'getUserLeaves']); // Admin/HOD/Senior only
+    Route::get('/leaves/pending', [LeaveController::class, 'getPendingLeaves']); // Admin only
+    Route::get('/leaves/statistics', [LeaveController::class, 'getStatistics']);
+    Route::get('/leaves/calendar', [LeaveController::class, 'getCalendar']);
+    Route::get('/leaves/team-on-leave', [LeaveController::class, 'getTeamOnLeave']);
+    Route::get('/leaves/calculate-days', [LeaveController::class, 'calculateDays']);
+    Route::post('/leaves', [LeaveController::class, 'createLeave']);
+    Route::get('/leaves/{id}', [LeaveController::class, 'getLeave']);
+    Route::post('/leaves/{id}/approve', [LeaveController::class, 'approveLeave']); // Admin only
+    Route::post('/leaves/{id}/reject', [LeaveController::class, 'rejectLeave']); // Admin only
+    Route::post('/leaves/{id}/cancel', [LeaveController::class, 'cancelLeave']);
+
+    Route::get('/holidays', [LeaveController::class, 'getHolidays']);
+    Route::post('/holidays', [LeaveController::class, 'createHoliday']); // Super admin only
+    Route::put('/holidays/{id}', [LeaveController::class, 'updateHoliday']); // Super admin only
+    Route::delete('/holidays/{id}', [LeaveController::class, 'deleteHoliday']); // Super admin only
+
+    // Attendance routes (Excel upload based)
+    Route::get('/attendance', [AttendanceController::class, 'index']);
+    Route::get('/attendance/statistics', [AttendanceController::class, 'statistics']);
+    Route::get('/attendance/template', [AttendanceController::class, 'downloadTemplate']);
+    Route::post('/attendance/upload', [AttendanceController::class, 'upload']); // Procurement/Admin only
+    Route::get('/users/{userId}/attendance', [AttendanceController::class, 'userAttendance']); // Get attendance for specific user
+    Route::get('/attendance/{id}', [AttendanceController::class, 'show']);
+    Route::delete('/attendance/{id}', [AttendanceController::class, 'destroy']); // Procurement/Admin only
+
+    // =====================================================
+    // GPS ATTENDANCE SYSTEM ROUTES
+    // =====================================================
+
+    // GPS Attendance - Employee Routes (Branch Employees AND Admin/Procurement with branch assignment)
+    Route::prefix('gps-attendance')->group(function () {
+        // Check access level
+        Route::get('/access', [GpsAttendanceController::class, 'checkAccess']);
+        
+        // Check-in/Check-out
+        Route::post('/check-in', [GpsAttendanceController::class, 'checkIn']);
+        Route::post('/check-out', [GpsAttendanceController::class, 'checkOut']);
+        
+        // Today's status
+        Route::get('/today', [GpsAttendanceController::class, 'todayStatus']);
+        
+        // Validate location before marking
+        Route::post('/validate-location', [GpsAttendanceController::class, 'validateLocation']);
+        
+        // Personal history and statistics
+        Route::get('/my-history', [GpsAttendanceController::class, 'myHistory']);
+        Route::get('/my-statistics', [GpsAttendanceController::class, 'myStatistics']);
+        
+        // Corrections
+        Route::post('/corrections', [GpsAttendanceController::class, 'requestCorrection']);
+        Route::get('/my-corrections', [GpsAttendanceController::class, 'getMyCorrections']);
+        Route::delete('/corrections/{id}', [GpsAttendanceController::class, 'withdrawCorrection']);
+        
+        // Admin self-assignment to branch (Admin/Procurement only)
+        Route::post('/assign-me-to-branch', [GpsAttendanceController::class, 'assignMeToBranch']);
+        Route::delete('/remove-my-branch/{branchId}', [GpsAttendanceController::class, 'removeMyBranchAssignment']);
+        Route::get('/available-branches', [GpsAttendanceController::class, 'getAvailableBranches']);
+    });
+
+    // Branch Management - Admin Routes
+    Route::prefix('branches')->group(function () {
+        Route::get('/', [BranchController::class, 'index']);
+        Route::post('/', [BranchController::class, 'store']);
+        Route::get('/{id}', [BranchController::class, 'show']);
+        Route::put('/{id}', [BranchController::class, 'update']);
+        Route::delete('/{id}', [BranchController::class, 'destroy']);
+        
+        // Branch status
+        Route::post('/{id}/activate', [BranchController::class, 'activate']);
+        Route::post('/{id}/deactivate', [BranchController::class, 'deactivate']);
+        
+        // Branch employees
+        Route::get('/{id}/employees', [BranchController::class, 'employees']);
+        Route::post('/{id}/employees', [BranchController::class, 'assignEmployee']);
+        Route::delete('/{branchId}/employees/{userId}', [BranchController::class, 'removeEmployee']);
+        
+        // Branch statistics
+        Route::get('/{id}/statistics', [BranchController::class, 'statistics']);
+    });
+
+    // Attendance Reports - Finance/Admin Routes
+    Route::prefix('attendance-reports')->group(function () {
+        Route::get('/daily', [AttendanceReportController::class, 'dailyReport']);
+        Route::get('/monthly', [AttendanceReportController::class, 'monthlyReport']);
+        Route::get('/employee/{userId}', [AttendanceReportController::class, 'employeeReport']);
+        Route::get('/export', [AttendanceReportController::class, 'exportCsv']);
+        Route::get('/export-excel', [AttendanceReportController::class, 'exportExcel']);
+        Route::get('/export-pdf', [AttendanceReportController::class, 'exportPdf']);
+        Route::get('/gps-validation-stats', [AttendanceReportController::class, 'gpsValidationStats']);
+        Route::get('/audit', [AttendanceReportController::class, 'auditReport']);
+    });
+
+    // Attendance Corrections - Admin Routes
+    Route::prefix('attendance-corrections')->group(function () {
+        Route::get('/', [AttendanceCorrectionController::class, 'index']);
+        Route::get('/statistics', [AttendanceCorrectionController::class, 'statistics']);
+        Route::get('/{id}', [AttendanceCorrectionController::class, 'show']);
+        Route::post('/{id}/approve', [AttendanceCorrectionController::class, 'approve']);
+        Route::post('/{id}/reject', [AttendanceCorrectionController::class, 'reject']);
+        Route::post('/bulk-action', [AttendanceCorrectionController::class, 'bulkAction']);
+    });
+
+    // Attendance Admin - Admin Only Routes
+    Route::prefix('attendance-admin')->group(function () {
+        Route::get('/live', [GpsAttendanceController::class, 'getLiveAttendance']);
+        Route::get('/corrections', [AttendanceCorrectionController::class, 'index']);
+        Route::get('/audit-logs', [GpsAttendanceController::class, 'getAuditLogs']);
+        
+        // Department Attendance Settings
+        Route::get('/departments', [GpsAttendanceController::class, 'getAttendanceDepartments']);
+        Route::post('/departments', [GpsAttendanceController::class, 'addAttendanceDepartment']);
+        Route::put('/departments/{id}', [GpsAttendanceController::class, 'updateAttendanceDepartment']);
+        Route::delete('/departments/{id}', [GpsAttendanceController::class, 'removeAttendanceDepartment']);
+    });
+
+    // Branch Time Settings
+    Route::put('/branches/{id}/time-settings', [BranchController::class, 'updateTimeSettings']);
 });

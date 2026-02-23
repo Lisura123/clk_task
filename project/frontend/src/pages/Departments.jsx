@@ -2,9 +2,13 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Building2, Users, X, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { departmentAPI, userAPI } from '../services/api';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 export default function Departments() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,20 +52,20 @@ export default function Departments() {
   const handleCreateDepartment = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      alert('Department name is required');
+      toast.warning('Department name is required');
       return;
     }
 
     try {
       setSubmitting(true);
       await departmentAPI.createDepartment(formData);
-      alert('Department created successfully');
+      toast.success('Department created successfully');
       setShowCreateModal(false);
       setFormData({ name: '', description: '' });
       fetchDepartments();
     } catch (error) {
       console.error('Error creating department:', error);
-      alert(error.response?.data?.message || 'Failed to create department');
+      toast.error(error.response?.data?.message || 'Failed to create department');
     } finally {
       setSubmitting(false);
     }
@@ -70,38 +74,43 @@ export default function Departments() {
   const handleEditDepartment = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      alert('Department name is required');
+      toast.warning('Department name is required');
       return;
     }
 
     try {
       setSubmitting(true);
       await departmentAPI.updateDepartment(selectedDepartment.id, formData);
-      alert('Department updated successfully');
+      toast.success('Department updated successfully');
       setShowEditModal(false);
       setSelectedDepartment(null);
       setFormData({ name: '', description: '' });
       fetchDepartments();
     } catch (error) {
       console.error('Error updating department:', error);
-      alert(error.response?.data?.message || 'Failed to update department');
+      toast.error(error.response?.data?.message || 'Failed to update department');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteDepartment = async (deptId, deptName) => {
-    if (!window.confirm(`Are you sure you want to delete "${deptName}"? This action cannot be undone.`)) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      type: 'danger',
+      title: 'Delete Department',
+      message: `Are you sure you want to delete "${deptName}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel'
+    });
+    if (!confirmed) return;
 
     try {
       await departmentAPI.deleteDepartment(deptId);
-      alert('Department deleted successfully');
+      toast.success('Department deleted successfully');
       fetchDepartments();
     } catch (error) {
       console.error('Error deleting department:', error);
-      alert(error.response?.data?.message || 'Failed to delete department');
+      toast.error(error.response?.data?.message || 'Failed to delete department');
     }
   };
 

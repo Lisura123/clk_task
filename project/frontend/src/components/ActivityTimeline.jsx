@@ -21,7 +21,7 @@ import {
   Download
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import axios from 'axios';
+import api from '../services/api';
 import useAuthStore from '../store/authStore';
 
 const ActivityTimeline = ({ taskId, refreshTrigger = 0 }) => {
@@ -61,9 +61,8 @@ const ActivityTimeline = ({ taskId, refreshTrigger = 0 }) => {
       if (dateRange.start) params.append('startDate', dateRange.start);
       if (dateRange.end) params.append('endDate', dateRange.end);
 
-      const response = await axios.get(
-        `http://localhost:5000/api/tasks/${taskId}/activities?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await api.get(
+        `/tasks/${taskId}/activities?${params}`
       );
 
       if (response.data.success) {
@@ -80,9 +79,8 @@ const ActivityTimeline = ({ taskId, refreshTrigger = 0 }) => {
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:5000/api/tasks/${taskId}/activities/stats`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await api.get(
+        `/tasks/${taskId}/activities/stats`
       );
 
       if (response.data.success) {
@@ -100,9 +98,8 @@ const ActivityTimeline = ({ taskId, refreshTrigger = 0 }) => {
     }
 
     try {
-      const response = await axios.get(
-        `http://localhost:5000/api/tasks/${taskId}/activities/search?query=${encodeURIComponent(searchQuery)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await api.get(
+        `/tasks/${taskId}/activities/search?query=${encodeURIComponent(searchQuery)}`
       );
 
       if (response.data.success) {
@@ -115,10 +112,9 @@ const ActivityTimeline = ({ taskId, refreshTrigger = 0 }) => {
 
   const handleExport = async (format = 'json') => {
     try {
-      const response = await axios.get(
-        `http://localhost:5000/api/tasks/${taskId}/activities/export?format=${format}`,
+      const response = await api.get(
+        `/tasks/${taskId}/activities/export?format=${format}`,
         { 
-          headers: { Authorization: `Bearer ${token}` },
           responseType: format === 'csv' ? 'blob' : 'json'
         }
       );

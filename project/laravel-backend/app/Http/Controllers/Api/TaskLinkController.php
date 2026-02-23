@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\TaskLink;
 use App\Models\Task;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -70,6 +71,32 @@ class TaskLinkController extends Controller
 
         $link->load('user:id,name,email');
 
+        // Create notification for task assignee
+        if ($task->assigned_to_id && $task->assigned_to_id !== $request->user()->id) {
+            Notification::create([
+                'user_id' => $task->assigned_to_id,
+                'triggered_by_id' => $request->user()->id,
+                'type' => 'link_added',
+                'title' => 'New Link Added to Task',
+                'message' => $request->user()->name . " added a link to task: {$task->title}",
+                'task_id' => $taskId,
+            ]);
+        }
+
+        // Also notify task creator if different
+        if ($task->created_by_id && 
+            $task->created_by_id !== $request->user()->id && 
+            $task->created_by_id !== $task->assigned_to_id) {
+            Notification::create([
+                'user_id' => $task->created_by_id,
+                'triggered_by_id' => $request->user()->id,
+                'type' => 'link_added',
+                'title' => 'New Link Added to Task',
+                'message' => $request->user()->name . " added a link to task: {$task->title}",
+                'task_id' => $taskId,
+            ]);
+        }
+
         return response()->json([
             'message' => 'Link added successfully',
             'link' => [
@@ -95,7 +122,7 @@ class TaskLinkController extends Controller
 
         // Only the person who added the link or admins can edit
         if ($link->added_by !== $request->user()->id && 
-            !in_array($request->user()->role, ['super_admin', 'dept_admin'])) {
+            !in_array($request->user()->role, ['admin', 'hod'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -142,7 +169,7 @@ class TaskLinkController extends Controller
 
         // Only the person who added the link or admins can delete
         if ($link->added_by !== $request->user()->id && 
-            !in_array($request->user()->role, ['super_admin', 'dept_admin'])) {
+            !in_array($request->user()->role, ['admin', 'hod'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

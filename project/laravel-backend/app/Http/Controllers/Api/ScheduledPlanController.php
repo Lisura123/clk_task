@@ -16,17 +16,32 @@ class ScheduledPlanController extends Controller
     public function index(Request $request)
     {
         $user = Auth::user();
-        $query = ScheduledPlan::with(['creator', 'department']);
+        $query = ScheduledPlan::with(['creator', 'department', 'group']);
 
         // Filter by user's access
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             // Super admin sees all
-        } elseif ($user->role === 'dept_admin') {
+        } elseif ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {
-            // Regular employees see their department's plans
-            $query->where('department_id', $user->department_id);
+            // Regular employees see plans from their department or groups they belong to
+            $userGroupIds = $user->groups()->pluck('groups.id')->toArray();
+            $userDepartmentId = $user->department_id;
+
+            if ($userDepartmentId || !empty($userGroupIds)) {
+                $query->where(function ($q) use ($userDepartmentId, $userGroupIds) {
+                    if ($userDepartmentId) {
+                        $q->where('department_id', $userDepartmentId);
+                    }
+                    if (!empty($userGroupIds)) {
+                        $q->orWhereIn('group_id', $userGroupIds);
+                    }
+                });
+            } else {
+                // If user has no department or groups, show nothing
+                $query->whereRaw('1 = 0');
+            }
         }
 
         // Filter by date range
@@ -47,12 +62,42 @@ class ScheduledPlanController extends Controller
         }
 
         $plans = $query->orderBy('start_date')->get()->map(function ($plan) {
+            // Get employees for this plan (from group if set, otherwise from department)
+            $employees = [];
+            if ($plan->group_id && $plan->group) {
+                $employees = $plan->group->members->map(function ($member) {
+                    return [
+                        'id' => $member->id,
+                        'name' => $member->name,
+                        'email' => $member->email,
+                        'role' => $member->pivot->role ?? 'member',
+                        'profile_picture' => $member->profile_picture,
+                    ];
+                })->toArray();
+            } elseif ($plan->department_id && $plan->department) {
+                $employees = $plan->department->users()
+                    ->whereIn('role', ['employee', 'senior_employee', 'hod'])
+                    ->where('status', 'active')
+                    ->get()
+                    ->map(function ($user) {
+                        return [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'email' => $user->email,
+                            'role' => $user->role,
+                            'profile_picture' => $user->profile_picture,
+                        ];
+                    })->toArray();
+            }
+
             return [
                 'id' => $plan->id,
                 'title' => $plan->title,
                 'description' => $plan->description,
                 'department_id' => $plan->department_id,
                 'department_name' => $plan->department->name ?? 'Unknown',
+                'group_id' => $plan->group_id,
+                'group_name' => $plan->group->name ?? null,
                 'created_by' => $plan->created_by,
                 'creator_name' => $plan->creator->name ?? 'Unknown',
                 'start_date' => $plan->start_date->format('Y-m-d'),
@@ -61,6 +106,8 @@ class ScheduledPlanController extends Controller
                 'recurrence_pattern' => $plan->recurrence_pattern,
                 'recurrence_end_date' => $plan->recurrence_end_date?->format('Y-m-d'),
                 'notes' => $plan->notes,
+                'employees' => $employees,
+                'employee_count' => count($employees),
                 'created_at' => $plan->created_at,
                 'updated_at' => $plan->updated_at,
             ];
@@ -77,7 +124,7 @@ class ScheduledPlanController extends Controller
         $user = Auth::user();
 
         // Check permission
-        if (!in_array($user->role, ['super_admin', 'dept_admin'])) {
+        if (!in_array($user->role, ['admin', 'hod'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -94,7 +141,7 @@ class ScheduledPlanController extends Controller
         ]);
 
         // Verify dept admin can create for this department
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array((int)$validated['department_id'], $managedDeptIds)) {
                 return response()->json(['message' => 'You can only create plans for your managed departments'], 403);
@@ -117,17 +164,65 @@ class ScheduledPlanController extends Controller
     public function show($id)
     {
         $user = Auth::user();
-        $plan = ScheduledPlan::with(['creator', 'department'])->findOrFail($id);
+        $plan = ScheduledPlan::with(['creator', 'department', 'group'])->findOrFail($id);
 
         // Check access
-        if ($user->role !== 'super_admin') {
+        if ($user->role !== 'admin') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
         }
 
-        return response()->json($plan);
+        // Get employees for this plan
+        $employees = [];
+        if ($plan->group_id && $plan->group) {
+            $employees = $plan->group->members->map(function ($member) {
+                return [
+                    'id' => $member->id,
+                    'name' => $member->name,
+                    'email' => $member->email,
+                    'role' => $member->pivot->role ?? 'member',
+                    'profile_picture' => $member->profile_picture,
+                ];
+            })->toArray();
+        } elseif ($plan->department_id && $plan->department) {
+            $employees = $plan->department->users()
+                ->whereIn('role', ['employee', 'senior_employee', 'hod'])
+                ->where('status', 'active')
+                ->get()
+                ->map(function ($user) {
+                    return [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                        'profile_picture' => $user->profile_picture,
+                    ];
+                })->toArray();
+        }
+
+        return response()->json([
+            'id' => $plan->id,
+            'title' => $plan->title,
+            'description' => $plan->description,
+            'department_id' => $plan->department_id,
+            'department_name' => $plan->department->name ?? 'Unknown',
+            'group_id' => $plan->group_id,
+            'group_name' => $plan->group->name ?? null,
+            'created_by' => $plan->created_by,
+            'creator_name' => $plan->creator->name ?? 'Unknown',
+            'start_date' => $plan->start_date->format('Y-m-d'),
+            'end_date' => $plan->end_date?->format('Y-m-d'),
+            'is_recurring' => $plan->is_recurring,
+            'recurrence_pattern' => $plan->recurrence_pattern,
+            'recurrence_end_date' => $plan->recurrence_end_date?->format('Y-m-d'),
+            'notes' => $plan->notes,
+            'employees' => $employees,
+            'employee_count' => count($employees),
+            'created_at' => $plan->created_at,
+            'updated_at' => $plan->updated_at,
+        ]);
     }
 
     /**
@@ -139,12 +234,12 @@ class ScheduledPlanController extends Controller
         $plan = ScheduledPlan::findOrFail($id);
 
         // Check permission
-        if (!in_array($user->role, ['super_admin', 'dept_admin'])) {
+        if (!in_array($user->role, ['admin', 'hod'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         // Check department access
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
@@ -179,12 +274,12 @@ class ScheduledPlanController extends Controller
         $plan = ScheduledPlan::findOrFail($id);
 
         // Check permission
-        if (!in_array($user->role, ['super_admin', 'dept_admin'])) {
+        if (!in_array($user->role, ['admin', 'hod'])) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         // Check department access
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             if (!in_array($plan->department_id, $managedDeptIds)) {
                 return response()->json(['message' => 'Unauthorized'], 403);
@@ -208,7 +303,7 @@ class ScheduledPlanController extends Controller
         $startDate = "{$year}-{$month}-01";
         $endDate = date('Y-m-t', strtotime($startDate));
 
-        $query = ScheduledPlan::with(['creator', 'department'])
+        $query = ScheduledPlan::with(['creator', 'department', 'group'])
             ->where(function($q) use ($startDate, $endDate) {
                 // Plan starts within the month
                 $q->whereBetween('start_date', [$startDate, $endDate])
@@ -227,13 +322,29 @@ class ScheduledPlanController extends Controller
             });
 
         // Filter by user's access
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             // Super admin sees all
-        } elseif ($user->role === 'dept_admin') {
+        } elseif ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {
-            $query->where('department_id', $user->department_id);
+            // Regular employees see plans from their department or groups they belong to
+            $userGroupIds = $user->groups()->pluck('groups.id')->toArray();
+            $userDepartmentId = $user->department_id;
+
+            if ($userDepartmentId || !empty($userGroupIds)) {
+                $query->where(function ($q) use ($userDepartmentId, $userGroupIds) {
+                    if ($userDepartmentId) {
+                        $q->where('department_id', $userDepartmentId);
+                    }
+                    if (!empty($userGroupIds)) {
+                        $q->orWhereIn('group_id', $userGroupIds);
+                    }
+                });
+            } else {
+                // If user has no department or groups, show nothing
+                $query->whereRaw('1 = 0');
+            }
         }
 
         // Filter by department if specified
@@ -248,6 +359,30 @@ class ScheduledPlanController extends Controller
         foreach ($plans as $plan) {
             $planStart = $plan->start_date;
             $planEnd = $plan->end_date ?? $plan->start_date;
+            
+            // Get employees for this plan
+            $employees = [];
+            if ($plan->group_id && $plan->group) {
+                $employees = $plan->group->members->map(function ($member) {
+                    return [
+                        'id' => $member->id,
+                        'name' => $member->name,
+                        'profile_picture' => $member->profile_picture,
+                    ];
+                })->toArray();
+            } elseif ($plan->department_id && $plan->department) {
+                $employees = $plan->department->users()
+                    ->whereIn('role', ['employee', 'senior_employee', 'hod'])
+                    ->where('status', 'active')
+                    ->get()
+                    ->map(function ($user) {
+                        return [
+                            'id' => $user->id,
+                            'name' => $user->name,
+                            'profile_picture' => $user->profile_picture,
+                        ];
+                    })->toArray();
+            }
             
             // Add plan to each day it spans
             $currentDate = clone $planStart;
@@ -267,12 +402,17 @@ class ScheduledPlanController extends Controller
                             'id' => $plan->id,
                             'title' => $plan->title,
                             'description' => $plan->description,
+                            'department_id' => $plan->department_id,
                             'department_name' => $plan->department->name ?? 'Unknown',
+                            'group_id' => $plan->group_id,
+                            'group_name' => $plan->group->name ?? null,
                             'start_date' => $plan->start_date->format('Y-m-d'),
                             'end_date' => $plan->end_date?->format('Y-m-d'),
                             'is_recurring' => $plan->is_recurring,
                             'recurrence_pattern' => $plan->recurrence_pattern,
                             'creator_name' => $plan->creator->name ?? 'Unknown',
+                            'employees' => $employees,
+                            'employee_count' => count($employees),
                         ];
                     }
                 }
@@ -305,9 +445,9 @@ class ScheduledPlanController extends Controller
             });
 
         // Filter by user's access
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             // Super admin sees all
-        } elseif ($user->role === 'dept_admin') {
+        } elseif ($user->role === 'hod') {
             $managedDeptIds = $this->getManagedDepartmentIds($user);
             $query->whereIn('department_id', $managedDeptIds);
         } else {

@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react';
 import { UserPlus, Check, X, Search, AlertCircle } from 'lucide-react';
 import { authAPI, departmentAPI } from '../services/api';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 export default function PendingRegistrations() {
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [pendingUsers, setPendingUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,23 +31,30 @@ export default function PendingRegistrations() {
       setDepartments(deptsRes.data.data || deptsRes.data || []);
     } catch (error) {
       console.error('Error fetching data:', error);
-      alert('Failed to fetch pending registrations');
+      toast.error('Failed to fetch pending registrations');
     } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (user) => {
-    if (!confirm(`Are you sure you want to approve ${user.name}?`)) return;
+    const confirmed = await confirmDialog({
+      title: 'Approve Registration',
+      message: `Are you sure you want to approve ${user.name}?`,
+      confirmText: 'Approve',
+      cancelText: 'Cancel',
+      type: 'info'
+    });
+    if (!confirmed) return;
     
     setActionLoading(true);
     try {
       const response = await authAPI.approveRegistration(user.id);
-      alert(`Registration approved for ${user.name}`);
+      toast.success(`Registration approved for ${user.name}`);
       fetchData(); // Refresh the list
     } catch (error) {
       console.error('Error approving user:', error);
-      alert(error.response?.data?.message || 'Failed to approve registration');
+      toast.error(error.response?.data?.message || 'Failed to approve registration');
     } finally {
       setActionLoading(false);
     }
@@ -57,21 +68,21 @@ export default function PendingRegistrations() {
 
   const submitRejection = async () => {
     if (!rejectReason.trim()) {
-      alert('Please provide a reason for rejection');
+      toast.warning('Please provide a reason for rejection');
       return;
     }
 
     setActionLoading(true);
     try {
       const response = await authAPI.rejectRegistration(selectedUser.id, rejectReason);
-      alert(`Registration rejected for ${selectedUser.name}`);
+      toast.success(`Registration rejected for ${selectedUser.name}`);
       setShowRejectModal(false);
       setSelectedUser(null);
       setRejectReason('');
       fetchData(); // Refresh the list
     } catch (error) {
       console.error('Error rejecting user:', error);
-      alert(error.response?.data?.message || 'Failed to reject registration');
+      toast.error(error.response?.data?.message || 'Failed to reject registration');
     } finally {
       setActionLoading(false);
     }

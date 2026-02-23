@@ -24,11 +24,15 @@ import {
 import { departmentAPI, groupAPI, scheduledPlanAPI, taskAPI, userAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
 import GroupChat from '../components/GroupChat';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 export default function DepartmentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [activeTab, setActiveTab] = useState('overview');
   const [department, setDepartment] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -113,7 +117,7 @@ export default function DepartmentDetails() {
       ]);
     } catch (error) {
       console.error('Error fetching department:', error);
-      alert('Failed to load department details');
+      toast.error('Failed to load department details');
       navigate('/dashboard/departments');
     } finally {
       setLoading(false);
@@ -163,9 +167,10 @@ export default function DepartmentDetails() {
       setShowGroupModal(false);
       resetGroupForm();
       fetchGroups();
+      toast.success('Group created successfully');
     } catch (error) {
       console.error('Error creating group:', error);
-      alert(error.response?.data?.message || 'Failed to create group');
+      toast.error(error.response?.data?.message || 'Failed to create group');
     }
   };
 
@@ -177,20 +182,29 @@ export default function DepartmentDetails() {
       setSelectedGroup(null);
       resetGroupForm();
       fetchGroups();
+      toast.success('Group updated successfully');
     } catch (error) {
       console.error('Error updating group:', error);
-      alert(error.response?.data?.message || 'Failed to update group');
+      toast.error(error.response?.data?.message || 'Failed to update group');
     }
   };
 
   const handleDeleteGroup = async (groupId) => {
-    if (!confirm('Are you sure you want to delete this group?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Group',
+      message: 'Are you sure you want to delete this group?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await groupAPI.delete(groupId);
       fetchGroups();
+      toast.success('Group deleted successfully');
     } catch (error) {
       console.error('Error deleting group:', error);
-      alert('Failed to delete group');
+      toast.error('Failed to delete group');
     }
   };
 
@@ -229,9 +243,10 @@ export default function DepartmentDetails() {
       setShowScheduleModal(false);
       resetScheduleForm();
       fetchSchedules();
+      toast.success('Schedule created successfully');
     } catch (error) {
       console.error('Error creating schedule:', error);
-      alert(error.response?.data?.message || 'Failed to create schedule');
+      toast.error(error.response?.data?.message || 'Failed to create schedule');
     }
   };
 
@@ -243,20 +258,29 @@ export default function DepartmentDetails() {
       setSelectedSchedule(null);
       resetScheduleForm();
       fetchSchedules();
+      toast.success('Schedule updated successfully');
     } catch (error) {
       console.error('Error updating schedule:', error);
-      alert(error.response?.data?.message || 'Failed to update schedule');
+      toast.error(error.response?.data?.message || 'Failed to update schedule');
     }
   };
 
   const handleDeleteSchedule = async (scheduleId) => {
-    if (!confirm('Are you sure you want to delete this schedule?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Schedule',
+      message: 'Are you sure you want to delete this schedule?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await scheduledPlanAPI.delete(scheduleId);
       fetchSchedules();
+      toast.success('Schedule deleted successfully');
     } catch (error) {
       console.error('Error deleting schedule:', error);
-      alert('Failed to delete schedule');
+      toast.error('Failed to delete schedule');
     }
   };
 
@@ -302,9 +326,10 @@ export default function DepartmentDetails() {
       setShowTaskModal(false);
       resetTaskForm();
       fetchTasks(department?.name);
+      toast.success('Task created successfully');
     } catch (error) {
       console.error('Error creating task:', error);
-      alert(error.response?.data?.message || 'Failed to create task');
+      toast.error(error.response?.data?.message || 'Failed to create task');
     }
   };
 
@@ -316,20 +341,29 @@ export default function DepartmentDetails() {
       setSelectedTask(null);
       resetTaskForm();
       fetchTasks(department?.name);
+      toast.success('Task updated successfully');
     } catch (error) {
       console.error('Error updating task:', error);
-      alert(error.response?.data?.message || 'Failed to update task');
+      toast.error(error.response?.data?.message || 'Failed to update task');
     }
   };
 
   const handleDeleteTask = async (taskId) => {
-    if (!confirm('Are you sure you want to delete this task?')) return;
+    const confirmed = await confirmDialog({
+      title: 'Delete Task',
+      message: 'Are you sure you want to delete this task?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await taskAPI.delete(taskId);
       fetchTasks(department?.name);
+      toast.success('Task deleted successfully');
     } catch (error) {
       console.error('Error deleting task:', error);
-      alert('Failed to delete task');
+      toast.error('Failed to delete task');
     }
   };
 

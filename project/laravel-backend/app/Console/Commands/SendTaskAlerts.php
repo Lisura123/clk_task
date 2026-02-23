@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Task;
 use App\Models\Notification;
+use App\Notifications\TaskAlertNotification;
 use Illuminate\Console\Command;
 use Carbon\Carbon;
 
@@ -68,6 +69,7 @@ class SendTaskAlerts extends Command
             if (!$existingAlert) {
                 $hoursRemaining = Carbon::now()->diffInHours($task->due_date);
                 
+                // Create in-app notification
                 Notification::create([
                     'user_id' => $task->assigned_to_id,
                     'type' => 'deadline_alert',
@@ -77,7 +79,14 @@ class SendTaskAlerts extends Command
                     'read_status' => false,
                 ]);
 
-                $this->line("Deadline alert sent for task #{$task->id}");
+                // Send email notification
+                try {
+                    $task->assignedTo->notify(new TaskAlertNotification($task, 'deadline', $hoursRemaining));
+                    $this->line("Deadline alert + email sent for task #{$task->id}");
+                } catch (\Exception $e) {
+                    $this->warn("Email failed for task #{$task->id}: " . $e->getMessage());
+                    $this->line("Deadline alert sent for task #{$task->id} (email failed)");
+                }
             }
         }
     }
@@ -107,6 +116,7 @@ class SendTaskAlerts extends Command
             if (!$existingAlert) {
                 $daysOverdue = Carbon::now()->diffInDays($task->due_date);
                 
+                // Create in-app notification
                 Notification::create([
                     'user_id' => $task->assigned_to_id,
                     'type' => 'task_overdue',
@@ -116,7 +126,14 @@ class SendTaskAlerts extends Command
                     'read_status' => false,
                 ]);
 
-                $this->line("Overdue alert sent for task #{$task->id}");
+                // Send email notification
+                try {
+                    $task->assignedTo->notify(new TaskAlertNotification($task, 'overdue', $daysOverdue));
+                    $this->line("Overdue alert + email sent for task #{$task->id}");
+                } catch (\Exception $e) {
+                    $this->warn("Email failed for task #{$task->id}: " . $e->getMessage());
+                    $this->line("Overdue alert sent for task #{$task->id} (email failed)");
+                }
             }
         }
     }

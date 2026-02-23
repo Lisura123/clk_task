@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\GroupMessage;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -69,6 +70,19 @@ class GroupMessageController extends Controller
             'reply_to_id' => $validated['reply_to_id'] ?? null,
         ]);
 
+        // Notify all group members except the sender
+        $groupMembers = $group->members()->where('users.id', '!=', $user->id)->pluck('users.id');
+        foreach ($groupMembers as $memberId) {
+            Notification::create([
+                'user_id' => $memberId,
+                'triggered_by_id' => $user->id,
+                'type' => 'group_message',
+                'title' => "New message in {$group->name}",
+                'message' => $user->name . ": " . \Str::limit($validated['message'], 50),
+                'task_id' => null,
+            ]);
+        }
+
         return response()->json([
             'message' => 'Message sent successfully',
             'data' => $message->load(['user:id,name,email,profile_picture,role', 'replyTo:id,message,user_id', 'replyTo.user:id,name']),
@@ -131,8 +145,8 @@ class GroupMessageController extends Controller
 
         // Allow deletion by: message author, group creator (dept admin), or super admin
         $canDelete = $message->user_id === $user->id 
-            || $user->role === 'super_admin'
-            || ($user->role === 'dept_admin' && $group->created_by === $user->id);
+            || $user->role === 'admin'
+            || ($user->role === 'hod' && $group->created_by === $user->id);
 
         if (!$canDelete) {
             return response()->json(['error' => 'Unauthorized'], 403);
@@ -148,11 +162,11 @@ class GroupMessageController extends Controller
      */
     private function canAccessGroup($user, Group $group): bool
     {
-        if ($user->role === 'super_admin') {
+        if ($user->role === 'admin') {
             return true;
         }
 
-        if ($user->role === 'dept_admin') {
+        if ($user->role === 'hod') {
             // Dept admin can access groups they created
             if ($group->created_by === $user->id) {
                 return true;

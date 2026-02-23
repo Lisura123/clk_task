@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, Users as UsersIcon, UserPlus, X, MessageCircle } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Users as UsersIcon, UserPlus, X, MessageCircle, Building2, Crown, ChevronRight } from 'lucide-react';
 import { groupAPI, userAPI, departmentAPI } from '../services/api';
 import useAuthStore from '../store/authStore';
 import GroupChat from '../components/GroupChat';
+import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 
 export default function Groups() {
   const { user } = useAuthStore();
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [groups, setGroups] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -29,26 +33,16 @@ export default function Groups() {
     fetchData();
   }, []);
 
-  // Auto-set department for dept admin when modal opens and departments are loaded
-  useEffect(() => {
-    if (!showCreateModal) return;
-    if (user?.role !== 'dept_admin') return;
-    if (departments.length === 0) return;
-    if (formData.department_id) return;
-
-    // For dept admin, just use the first available department (already filtered)
-    const firstDept = departments[0];
-    if (firstDept) {
-      setFormData((prev) => ({
-        ...prev,
-        department_id: Number(firstDept.id),
-      }));
-    }
-  }, [showCreateModal, departments, user?.role, formData.department_id]);
-
   const fetchData = async () => {
     try {
       setLoading(true);
+      
+      // Debug: Log user from store
+      console.log('=== GROUPS DEBUG ===');
+      console.log('User from store:', user);
+      console.log('User managed_department_ids:', user?.managed_department_ids);
+      console.log('typeof managed_department_ids:', typeof user?.managed_department_ids);
+      
       const [groupsRes, deptsRes, usersRes] = await Promise.all([
         groupAPI.getAll(),
         departmentAPI.getAllDepartments(),
@@ -66,28 +60,9 @@ export default function Groups() {
       
       let availableDepartments = deptsRes.data || [];
       
-      // For dept admin, filter to their managed departments OR their own department
-      if (user?.role === 'dept_admin') {
-        const managedDeptIds = (user?.managed_department_ids ?? [])
-          .map((id) => Number(id))
-          .filter((id) => Number.isFinite(id) && id > 0);
-
-        // If no managed_department_ids, use their own department_id
-        const deptIdsToShow = managedDeptIds.length > 0 
-          ? managedDeptIds 
-          : (user?.department_id ? [Number(user.department_id)] : []);
-
-        console.log('Dept admin filtering departments:', { 
-          managedDeptIds, 
-          userDeptId: user?.department_id,
-          deptIdsToShow,
-          availableDepartments 
-        });
-
-        availableDepartments = availableDepartments.filter((dept) =>
-          deptIdsToShow.includes(Number(dept.id))
-        );
-      }
+      // Admin, HOD, and Senior Employee can see ALL departments
+      // No filtering needed - they all have cross-department access
+      
       setDepartments(availableDepartments);
       setEmployees(usersRes.data.data || []);
     } catch (error) {
@@ -98,16 +73,11 @@ export default function Groups() {
   };
 
   const handleOpenCreateModal = () => {
-    // For dept admin, auto-set their department
-    let initialDeptId = '';
-    if (user?.role === 'dept_admin' && departments.length > 0) {
-      initialDeptId = Number(departments[0].id);
-    }
-    
+    // Don't auto-select department - let user choose
     setFormData({
       name: '',
       description: '',
-      department_id: initialDeptId,
+      department_id: '',
       member_ids: [],
       leader_ids: []
     });
@@ -137,7 +107,7 @@ export default function Groups() {
     } catch (error) {
       console.error('Error creating group:', error);
       const errorMsg = error.response?.data?.message || 'Failed to create group';
-      alert(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -151,18 +121,26 @@ export default function Groups() {
     } catch (error) {
       console.error('Error updating group:', error);
       const errorMsg = error.response?.data?.message || 'Failed to update group';
-      alert(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
   const handleDelete = async (groupId) => {
-    if (!confirm('Are you sure you want to delete this group?')) return;
+    const confirmed = await confirmDialog({
+      type: 'danger',
+      title: 'Delete Group',
+      message: 'Are you sure you want to delete this group? This action cannot be undone.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel'
+    });
+    if (!confirmed) return;
     try {
       await groupAPI.delete(groupId);
+      toast.success('Group deleted successfully');
       fetchData();
     } catch (error) {
       console.error('Error deleting group:', error);
-      alert('Failed to delete group');
+      toast.error('Failed to delete group');
     }
   };
 
@@ -223,43 +201,118 @@ export default function Groups() {
     return matchesSearch && matchesDept;
   });
 
+  // For Admin, HOD, and Senior Employee - show ALL employees (cross-department)
+  // When a department is selected, still show all employees but highlight the ones from that department
+  const canSelectCrossDept = ['admin', 'hod', 'senior_employee'].includes(user?.role);
+  
   const availableEmployees = formData.department_id
-    ? employees.filter((emp) => Number(emp.department_id) === Number(formData.department_id))
-    : [];
+    ? (canSelectCrossDept 
+        ? employees // Show all employees for cross-department selection
+        : employees.filter((emp) => Number(emp.department_id) === Number(formData.department_id)))
+    : (canSelectCrossDept ? employees : []);
 
   const filteredAvailableEmployees = availableEmployees.filter(emp =>
     (emp.name || emp.username || '').toLowerCase().includes(memberSearchTerm.toLowerCase())
   );
 
+  // Admin, HOD, and Senior Employees can create/edit/delete groups
+  const canManageGroups = user?.role === 'admin' || user?.role === 'hod' || user?.role === 'senior_employee';
+
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-black">Groups</h1>
-        <p className="text-gray-600 mt-1">Manage department groups and teams</p>
+    <div className="min-h-screen">
+      {/* Modern Header with Gradient - Updated Jan 16 2026 */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
+                <UsersIcon className="w-5 h-5 text-white" />
+              </div>
+              Groups
+            </h1>
+            <p className="text-gray-500 mt-2 ml-13">{canManageGroups ? 'Manage department groups and team collaboration' : 'View department groups and team collaboration'}</p>
+          </div>
+          {canManageGroups && (
+            <button
+              onClick={handleOpenCreateModal}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl hover:from-red-700 hover:to-red-600 transition-all shadow-lg shadow-red-500/25 font-medium"
+            >
+              <Plus className="w-5 h-5" />
+              Create Group
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Filters & Actions */}
-      <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-gray-200">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <UsersIcon className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{groups.length}</p>
+              <p className="text-xs text-gray-500">Total Groups</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+              <UserPlus className="w-5 h-5 text-green-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{groups.reduce((acc, g) => acc + (g.member_count || 0), 0)}</p>
+              <p className="text-xs text-gray-500">Total Members</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+              <Building2 className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{departments.length}</p>
+              <p className="text-xs text-gray-500">Departments</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{groups.filter(g => (g.member_count || 0) > 0).length}</p>
+              <p className="text-xs text-gray-500">Active Groups</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl shadow-sm p-4 mb-6 border border-gray-100">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex-1 w-full sm:w-auto">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search groups..."
+                placeholder="Search groups by name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 bg-gray-50"
               />
             </div>
           </div>
 
-          {user.role !== 'dept_admin' && (
+          {user.role !== 'hod' && (
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 bg-gray-50 min-w-[180px]"
             >
               <option value="all">All Departments</option>
               {departments.map(dept => (
@@ -267,14 +320,6 @@ export default function Groups() {
               ))}
             </select>
           )}
-
-          <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-5 h-5" />
-            Create Group
-          </button>
         </div>
       </div>
 
@@ -284,57 +329,107 @@ export default function Groups() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredGroups.length > 0 ? (
             filteredGroups.map((group) => (
-              <div key={group.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-                    <UsersIcon className="w-6 h-6 text-red-600" />
+              <div key={group.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg hover:border-gray-200 transition-all duration-300 group">
+                {/* Card Header with Gradient */}
+                <div className="h-2 bg-gradient-to-r from-red-500 via-red-400 to-orange-400"></div>
+                
+                <div className="p-5">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-gradient-to-br from-red-100 to-red-50 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform">
+                        <UsersIcon className="w-6 h-6 text-red-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{group.name}</h3>
+                        <p className="text-xs text-gray-500 flex items-center gap-1">
+                          <Building2 className="w-3 h-3" />
+                          {group.department?.name || 'No Department'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full">
+                      {group.member_count || 0} members
+                    </span>
                   </div>
-                  <span className="text-xs text-gray-500">{group.member_count || 0} members</span>
-                </div>
 
-                <h3 className="text-lg font-semibold text-black mb-1">{group.name}</h3>
-                <p className="text-sm text-gray-600 mb-3">{group.description || 'No description'}</p>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2 min-h-[40px]">
+                    {group.description || 'No description provided for this group'}
+                  </p>
 
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Department:</span>
-                    <span className="font-medium text-black">{group.department?.name}</span>
+                  {/* Members Preview */}
+                  {group.members && group.members.length > 0 && (
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="flex -space-x-2">
+                        {group.members.slice(0, 4).map((member, idx) => (
+                          <div 
+                            key={member.id} 
+                            className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 border-2 border-white flex items-center justify-center text-xs font-medium text-gray-600"
+                            title={member.name}
+                          >
+                            {member.name?.charAt(0).toUpperCase()}
+                          </div>
+                        ))}
+                        {group.members.length > 4 && (
+                          <div className="w-8 h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center text-xs font-medium text-gray-500">
+                            +{group.members.length - 4}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-400">Team members</span>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={() => setChatGroup(group)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all font-medium shadow-sm"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      Chat
+                    </button>
+                    {canManageGroups && (
+                      <>
+                        <button
+                          onClick={() => handleEdit(group)}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all font-medium"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(group.id)}
+                          className="flex items-center justify-center px-3 py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
                   </div>
-                </div>
-
-                <div className="flex gap-2 pt-4 border-t border-gray-200">
-                  <button
-                    onClick={() => setChatGroup(group)}
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
-                    title="Group Chat"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    Chat
-                  </button>
-                  <button
-                    onClick={() => handleEdit(group)}
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(group.id)}
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Delete
-                  </button>
                 </div>
               </div>
             ))
           ) : (
-            <div className="col-span-full text-center py-12">
-              <UsersIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No groups found</p>
+            <div className="col-span-full">
+              <div className="text-center py-16 bg-white rounded-xl border border-gray-100">
+                <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <UsersIcon className="w-10 h-10 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-1">No groups found</h3>
+                <p className="text-gray-500 mb-4">{canManageGroups ? 'Create your first group to start collaborating' : 'No groups available yet'}</p>
+                {canManageGroups && (
+                  <button
+                    onClick={handleOpenCreateModal}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create Group
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -382,20 +477,17 @@ export default function Groups() {
                 <select
                   value={formData.department_id || ''}
                   onChange={(e) => setFormData({ ...formData, department_id: Number(e.target.value), member_ids: [], leader_ids: [] })}
-                  disabled={user?.role === 'dept_admin'}
-                  className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                    user?.role === 'dept_admin' ? 'bg-gray-100 cursor-not-allowed' : ''
-                  }`}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   required
                 >
-                  {user?.role !== 'dept_admin' && <option value="">Select Department</option>}
+                  <option value="">Select Department</option>
                   {departments.map(dept => (
                     <option key={dept.id} value={dept.id}>{dept.name}</option>
                   ))}
                 </select>
-                {user?.role === 'dept_admin' && formData.department_id && (
+                {user?.role === 'hod' && departments.length > 0 && (
                   <p className="text-blue-600 text-xs mt-1">
-                    This is your managed department and cannot be changed
+                    You can create groups in your managed departments
                   </p>
                 )}
               </div>
