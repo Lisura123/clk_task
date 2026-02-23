@@ -312,7 +312,7 @@ export default function DashboardLayout() {
   // Check if user is from Procurement department (case-insensitive, partial match)
   const isProcurementUser = (user?.department_name?.toLowerCase()?.includes('procurement')) || 
                             (user?.department?.toLowerCase()?.includes('procurement')) ||
-                            (user?.department_id == 8) ||
+                            (user?.department_id == 7) || (user?.department_id == 8) ||  // Procurement department ID fallback
                             (user?.departmentRelation?.name?.toLowerCase()?.includes('procurement'));
 
   // Check if user is admin

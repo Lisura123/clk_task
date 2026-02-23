@@ -495,9 +495,12 @@ export default function Users() {
             const isMultiDeptHOD = user.role === 'hod' && managedIds.length > 1;
             const isSingleDeptHOD = user.role === 'hod' && managedIds.length <= 1;
             
-            // Check if user is from Procurement department (can view all)
-            const userDeptName = user?.department_name?.toLowerCase() || user?.department?.toLowerCase() || '';
-            const isProcurement = userDeptName === 'procurement';
+            // Check if user is from Procurement department (case-insensitive, partial match)
+            // Use the same logic as DashboardLayout for consistency
+            const isProcurement = (user?.department_name?.toLowerCase()?.includes('procurement')) || 
+                                  (user?.department?.toLowerCase()?.includes('procurement')) ||
+                                  (user?.department_id == 7) || (user?.department_id == 8) ||  // Procurement department ID fallback
+                                  (user?.departmentRelation?.name?.toLowerCase()?.includes('procurement'));
             
             // Determine if user can see all departments
             const canSeeAllDepts = user.role === 'admin' || isProcurement;
