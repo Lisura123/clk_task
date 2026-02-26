@@ -154,7 +154,7 @@ class LeaveRequest extends Model
     public function getStatusLabelAttribute()
     {
         // For Procurement employees with pending status, show "Pending Admin Approval" since they skip HOD
-        if ($this->status === 'pending' && $this->user && $this->user->isProcurement()) {
+        if ($this->status === 'pending' && $this->user && $this->user->isHR()) {
             return 'Pending Admin Approval';
         }
         
@@ -171,7 +171,7 @@ class LeaveRequest extends Model
     public function getRequiresAdminApprovalAttribute()
     {
         // Procurement employees go directly to admin (skip HOD)
-        if ($this->user && $this->user->isProcurement()) {
+        if ($this->user && $this->user->isHR()) {
             return true;
         }
         
@@ -231,8 +231,8 @@ class LeaveRequest extends Model
      */
     public function needsHodApproval()
     {
-        // Procurement department employees skip HOD approval - go directly to admin
-        if ($this->user && $this->user->isProcurement()) {
+        // HR department employees skip HOD approval - go directly to admin
+        if ($this->user && $this->user->isHR()) {
             return false;
         }
         
@@ -245,8 +245,8 @@ class LeaveRequest extends Model
      */
     public function needsAdminApproval()
     {
-        // Procurement department employees go directly to admin (pending status)
-        if ($this->user && $this->user->isProcurement()) {
+        // HR department employees go directly to admin (pending status)
+        if ($this->user && $this->user->isHR()) {
             return $this->status === 'pending';
         }
         
@@ -440,15 +440,15 @@ class LeaveRequest extends Model
     {
         $this->load(['user', 'leaveType']);
         
-        // Get Procurement department ID
-        $procurementDeptId = Department::where('name', 'Procurement')->value('id');
-        $isProcurement = $this->department_id == $procurementDeptId;
+        // Get HR department ID
+        $hrDeptId = Department::where('name', 'HR')->value('id') ?? 12;
+        $isHR = $this->department_id == $hrDeptId;
         
         $notifyUsers = collect();
         
         if ($previousStatus === 'pending') {
             // Notify whoever would have received the request
-            if ($this->user->role === 'hod' || $isProcurement) {
+            if ($this->user->role === 'hod' || $isHR) {
                 // Would have gone to admins
                 $notifyUsers = User::where('role', 'admin')->get();
             } else {
@@ -466,7 +466,7 @@ class LeaveRequest extends Model
             // Was already approved - notify both HOD (if applicable) and admins
             $admins = User::where('role', 'admin')->get();
             
-            if (!$isProcurement && $this->user->role !== 'hod') {
+            if (!$isHR && $this->user->role !== 'hod') {
                 $hods = User::where('role', 'hod')
                     ->where(function ($q) {
                         $q->whereJsonContains('managed_department_ids', $this->department_id)

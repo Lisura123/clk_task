@@ -6,6 +6,7 @@ import {
   UsersRound,
   Building2,
   ClipboardList,
+  ClipboardCheck,
   Bell,
   Settings,
   LogOut,
@@ -30,7 +31,8 @@ import {
   Home,
   Briefcase,
   Clock,
-  MapPin
+  MapPin,
+  Wallet
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import api from '../services/api';
@@ -287,14 +289,16 @@ export default function DashboardLayout() {
     { name: 'Groups', href: '/dashboard/groups', icon: UsersRound, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'work', tourId: 'groups' },
     { name: 'Attendance', href: '/dashboard/attendance', icon: Clock, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', tourId: 'attendance' },
     { name: 'GPS Attendance', href: '/dashboard/gps-attendance', icon: MapPin, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', gpsAttendanceOnly: true, tourId: 'gps-attendance' },
-    { name: 'Attendance Reports', href: '/dashboard/attendance-reports', icon: FileText, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', adminOrProcurementOnly: true, tourId: 'attendance-reports' },
-    { name: 'Attendance Admin', href: '/dashboard/attendance-admin', icon: Settings, roles: ['admin'], category: 'attendance', tourId: 'attendance-admin' },
+    { name: 'Attendance Reports', href: '/dashboard/attendance-reports', icon: FileText, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', adminOrHROnly: true, tourId: 'attendance-reports' },
+    { name: 'Attendance Admin', href: '/dashboard/attendance-admin', icon: Settings, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', adminOrHROnly: true, tourId: 'attendance-admin' },
+    { name: 'Attendance Requests', href: '/dashboard/attendance-requests', icon: ClipboardCheck, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', tourId: 'attendance-requests' },
     { name: 'Showroom Management', href: '/dashboard/branches', icon: Building2, roles: ['admin'], category: 'attendance', tourId: 'branches' },
     { name: 'My Leaves', href: '/dashboard/my-leaves', icon: Palmtree, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', tourId: 'my-leaves' },
     { name: 'Leave Approval', href: '/dashboard/leave-approval', icon: CalendarDays, roles: ['admin', 'hod'], category: 'leave', tourId: 'leaves' },
-    { name: 'Leave Settings', href: '/dashboard/leave-settings', icon: Settings, roles: ['admin'], category: 'leave', tourId: 'leave-settings' },
+    { name: 'Leave Balances', href: '/dashboard/leave-balances', icon: Wallet, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-balances' },
+    { name: 'Leave Settings', href: '/dashboard/leave-settings', icon: Settings, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-settings' },
     { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['admin', 'hod'], category: 'admin', tourId: 'users' },
-    { name: 'Employees', href: '/dashboard/all-employees', icon: Users, roles: ['senior_employee', 'employee'], category: 'work', procurementOnly: true, tourId: 'employees' },
+    { name: 'Employees', href: '/dashboard/all-employees', icon: Users, roles: ['senior_employee', 'employee'], category: 'work', hrOnly: true, tourId: 'employees' },
     { name: 'Create Employee', href: '/dashboard/create-employee', icon: UserPlus, roles: ['admin', 'hod'], category: 'admin', tourId: 'create-employee' },
     { name: 'Pending Registrations', href: '/dashboard/pending-registrations', icon: UserCheck, roles: ['admin', 'hod'], category: 'admin', tourId: 'pending-registrations' },
     { name: 'Departments', href: '/dashboard/departments', icon: Building2, roles: ['admin'], category: 'admin', tourId: 'departments' },
@@ -309,11 +313,11 @@ export default function DashboardLayout() {
     admin: 'Administration'
   };
 
-  // Check if user is from Procurement department (case-insensitive, partial match)
-  const isProcurementUser = (user?.department_name?.toLowerCase()?.includes('procurement')) || 
-                            (user?.department?.toLowerCase()?.includes('procurement')) ||
-                            (user?.department_id == 7) || (user?.department_id == 8) ||  // Procurement department ID fallback
-                            (user?.departmentRelation?.name?.toLowerCase()?.includes('procurement'));
+  // Check if user is from HR department (ID 12)
+  const isHRUser = (user?.department_name?.toLowerCase() === 'hr') || 
+                   (user?.department?.toLowerCase() === 'hr') ||
+                   (user?.department_id == 12) ||  // HR department ID
+                   (user?.departmentRelation?.name?.toLowerCase() === 'hr');
 
   // Check if user is admin
   const isAdminUser = user?.role === 'admin';
@@ -322,11 +326,11 @@ export default function DashboardLayout() {
     // Check role first
     if (!item.roles.includes(user?.role)) return false;
     
-    // If item is admin or procurement only, check if user is admin OR from Procurement
-    if (item.adminOrProcurementOnly && !isAdminUser && !isProcurementUser) return false;
+    // If item is admin or HR only, check if user is admin OR from HR
+    if (item.adminOrHROnly && !isAdminUser && !isHRUser) return false;
     
-    // If item is procurement-only, check if user is from Procurement
-    if (item.procurementOnly && !isProcurementUser) return false;
+    // If item is HR-only, check if user is from HR
+    if (item.hrOnly && !isHRUser) return false;
     
     // If item is GPS attendance only, check if user has GPS attendance access
     if (item.gpsAttendanceOnly && !hasGpsAttendanceAccess) return false;

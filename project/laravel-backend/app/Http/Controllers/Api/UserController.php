@@ -26,18 +26,18 @@ class UserController extends Controller
             'user_id' => $user->id,
             'user_role' => $user->role,
             'is_dept_admin_check' => $user->isDeptAdmin(),
-            'is_procurement' => $user->isProcurement(),
+            'is_hr' => $user->isHR(),
             'managed_department_ids' => $user->managed_department_ids
         ]);
 
-        // Procurement users can see all employees (like admin)
+        // HR users can see all employees (like admin)
         // Admin can see all employees
         // HOD can see their managed departments only
         // Other employees should not access this endpoint
         
-        if ($user->isProcurement()) {
-            // Procurement can see all users - no filtering needed
-            \Log::info('Procurement user - showing all users');
+        if ($user->isHR()) {
+            // HR can see all users - no filtering needed
+            \Log::info('HR user - showing all users');
         } elseif ($user->isDeptAdmin()) {
             // Filter by managed departments for dept admin
             $managedDeptIds = $user->managed_department_ids ?? [];
@@ -449,26 +449,26 @@ class UserController extends Controller
         \Log::info('Update context', [
             'current_user_id' => $user->id,
             'current_user_role' => $user->role,
-            'is_procurement' => $user->isProcurement(),
+            'is_hr' => $user->isHR(),
             'is_admin' => $user->isAdmin(),
             'is_hod' => $user->isHod(),
             'is_employee' => $user->isEmployee(),
         ]);
 
         // Regular employees cannot update other users
-        if ($user->isEmployee() && !$user->isProcurement()) {
+        if ($user->isEmployee() && !$user->isHR()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Procurement users can update employee data (like Admin/HOD)
-        if ($user->isProcurement() && !$user->isAdmin() && !$user->isHod()) {
-            \Log::info('Procurement update request', [
+        // HR users can update employee data (like Admin/HOD)
+        if ($user->isHR() && !$user->isAdmin() && !$user->isHod()) {
+            \Log::info('HR update request', [
                 'all_input' => $request->all(),
                 'emp_code_input' => $request->input('emp_code'),
                 'has_emp_code' => $request->has('emp_code'),
             ]);
             
-            // Procurement can update basic employee info but not roles/status for non-procurement departments
+            // HR can update basic employee info but not roles/status for non-HR departments
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255',
                 'username' => 'sometimes|string|max:50|unique:users,username,' . $id,

@@ -73,7 +73,7 @@ class AttendanceController extends Controller
         $user = $request->user();
         
         // Only Admin, HOD, and Procurement can view all attendance
-        if (!$user->isAdmin() && !$user->isHod() && !$user->isProcurement()) {
+        if (!$user->isAdmin() && !$user->isHod() && !$user->isHR()) {
             // Regular employees can only see their own attendance
             if ($user->emp_code) {
                 $query = Attendance::query();
@@ -94,13 +94,29 @@ class AttendanceController extends Controller
             $query = Attendance::query();
             
             // HOD can only see their department's attendance
-            if ($user->isHod() && !$user->isAdmin() && !$user->isProcurement()) {
+            if ($user->isHod() && !$user->isAdmin() && !$user->isHR()) {
                 $managedDepts = $user->managed_department_ids ?? [];
                 if (!empty($managedDepts)) {
                     $deptNames = \App\Models\Department::whereIn('id', $managedDepts)->pluck('name')->toArray();
                     $query->whereIn('dept_name', $deptNames);
                 }
             }
+        }
+        
+        // Filter by attendance source/method
+        $source = $request->get('source', 'upload'); // 'upload', 'gps', 'all'
+        if ($source === 'gps') {
+            // Show only GPS attendance records
+            $query->where('attendance_method', Attendance::METHOD_GPS_APP);
+        } elseif ($source === 'all') {
+            // Show all attendance records (both upload and GPS)
+            // No filter needed
+        } else {
+            // Default: Exclude GPS attendance records - they are shown on GPS Attendance page
+            $query->where(function($q) {
+                $q->whereNull('attendance_method')
+                  ->orWhere('attendance_method', '!=', Attendance::METHOD_GPS_APP);
+            });
         }
         
         // Filter by date range
@@ -139,7 +155,7 @@ class AttendanceController extends Controller
                             ->orderBy('emp_code')
                             ->paginate($request->get('per_page', 50));
         
-        // Enrich with user names
+        // Enrich with user names and GPS data
         $attendances->getCollection()->transform(function ($attendance) {
             // First try exact match, then try matching without leading zeros
             $user = User::where('emp_code', $attendance->emp_code)->first();
@@ -154,6 +170,17 @@ class AttendanceController extends Controller
             }
             $attendance->employee_name = $user ? $user->name : null;
             $attendance->employee_id = $user ? $user->id : null;
+            
+            // Include GPS-specific data if this is a GPS attendance record
+            if ($attendance->attendance_method === Attendance::METHOD_GPS_APP) {
+                $attendance->is_gps = true;
+                $attendance->branch_name = $attendance->verified_branch_name ?? ($attendance->branch ? $attendance->branch->name : null);
+                $attendance->check_in_location = $attendance->check_in_address;
+                $attendance->check_out_location = $attendance->check_out_address;
+            } else {
+                $attendance->is_gps = false;
+            }
+            
             return $attendance;
         });
         
@@ -167,9 +194,9 @@ class AttendanceController extends Controller
     {
         $user = $request->user();
         
-        // Only Procurement department users can upload
-        if (!$user->isProcurement()) {
-            return response()->json(['message' => 'Unauthorized. Only Procurement department can upload attendance.'], 403);
+        // Only HR department users can upload
+        if (!$user->isHR()) {
+            return response()->json(['message' => 'Unauthorized. Only HR department can upload attendance.'], 403);
         }
         
         $validator = Validator::make($request->all(), [
@@ -261,6 +288,7 @@ class AttendanceController extends Controller
                     'in_time' => $inTime,
                     'out_time' => $outTime,
                     'user_id' => $matchedUser ? $matchedUser->id : null, // Link to user if emp_code matches
+                    'attendance_method' => Attendance::METHOD_UPLOAD, // Mark as uploaded from report
                 ];
                 
                 if ($existing) {
@@ -846,8 +874,21 @@ class AttendanceController extends Controller
         
         $query = Attendance::query();
         
+        // Filter by attendance source/method
+        $source = $request->get('source', 'upload'); // 'upload', 'gps', 'all'
+        if ($source === 'gps') {
+            $query->where('attendance_method', Attendance::METHOD_GPS_APP);
+        } elseif ($source === 'all') {
+            // Show all records
+        } else {
+            $query->where(function($q) {
+                $q->whereNull('attendance_method')
+                  ->orWhere('attendance_method', '!=', Attendance::METHOD_GPS_APP);
+            });
+        }
+        
         // Regular employees can only see their own statistics
-        if (!$user->isAdmin() && !$user->isHod() && !$user->isProcurement()) {
+        if (!$user->isAdmin() && !$user->isHod() && !$user->isHR()) {
             if ($user->emp_code) {
                 $this->applyEmpCodeFilter($query, $user->emp_code);
             } else {
@@ -862,7 +903,7 @@ class AttendanceController extends Controller
                     'is_own_records' => true,
                 ]);
             }
-        } elseif ($user->isHod() && !$user->isAdmin() && !$user->isProcurement()) {
+        } elseif ($user->isHod() && !$user->isAdmin() && !$user->isHR()) {
             // HOD filter - can see their department's attendance
             $managedDepts = $user->managed_department_ids ?? [];
             if (!empty($managedDepts)) {
@@ -885,7 +926,7 @@ class AttendanceController extends Controller
                 'start' => $startDate,
                 'end' => $endDate,
             ],
-            'is_own_records' => !$user->isAdmin() && !$user->isHod() && !$user->isProcurement(),
+            'is_own_records' => !$user->isAdmin() && !$user->isHod() && !$user->isHR(),
         ];
         
         return response()->json($stats);
@@ -896,10 +937,10 @@ class AttendanceController extends Controller
      */
     public function downloadTemplate()
     {
-        $headers = ['Date', 'Emp Code', 'FP Code', 'Dept Name', 'In', 'Out'];
+        $headers = ['Date', 'Emp Code', 'Employee', 'FP Code', 'Department', 'In', 'Out'];
         $sampleData = [
-            ['2026-01-30', 'EMP001', 'FP001', 'IT Department', '09:00', '18:00'],
-            ['2026-01-30', 'EMP002', 'FP002', 'HR Department', '08:30', '17:30'],
+            ['2026-01-30', 'EMP001', 'John Doe', 'FP001', 'IT Department', '09:00', '18:00'],
+            ['2026-01-30', 'EMP002', 'Jane Smith', 'FP002', 'HR Department', '08:30', '17:30'],
         ];
         
         $csv = implode(',', $headers) . "\n";
@@ -913,15 +954,84 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Delete attendance record
+     * Export attendance records to CSV (HR and Admin only)
+     */
+    public function export(Request $request)
+    {
+        $user = $request->user();
+        
+        // HR department and Admin users can export
+        if (!$user->isHR() && !$user->isAdmin()) {
+            return response()->json(['message' => 'Unauthorized. Only HR department and Admin can export attendance records.'], 403);
+        }
+        
+        $query = Attendance::where('attendance_method', '!=', 'gps_app');
+        
+        // Apply filters
+        if ($request->start_date) {
+            $query->whereDate('date', '>=', $request->start_date);
+        }
+        if ($request->end_date) {
+            $query->whereDate('date', '<=', $request->end_date);
+        }
+        if ($request->department) {
+            $query->where('dept_name', 'LIKE', '%' . $request->department . '%');
+        }
+        if ($request->emp_code) {
+            $query->where('emp_code', 'LIKE', '%' . $request->emp_code . '%');
+        }
+        
+        $attendances = $query->orderBy('date', 'desc')->orderBy('emp_code')->get();
+        
+        // Build CSV
+        $csv = "Date,Emp Code,Employee,FP Code,Department,In,Out,Working Hours\n";
+        
+        foreach ($attendances as $record) {
+            $empUser = User::where('emp_code', $record->emp_code)->first();
+            $employeeName = $empUser ? $empUser->name : 'Unknown';
+            
+            // Calculate working hours
+            $workingHours = '-';
+            if ($record->in_time && $record->out_time) {
+                $in = strtotime($record->in_time);
+                $out = strtotime($record->out_time);
+                $diff = $out - $in;
+                if ($diff < 0) $diff += 86400; // Handle overnight
+                $hours = floor($diff / 3600);
+                $minutes = floor(($diff % 3600) / 60);
+                $workingHours = "{$hours}h {$minutes}m";
+            }
+            
+            $row = [
+                $record->date,
+                $record->emp_code,
+                '"' . str_replace('"', '""', $employeeName) . '"',
+                $record->fp_code ?? '',
+                '"' . str_replace('"', '""', $record->dept_name ?? '') . '"',
+                $record->in_time ? substr($record->in_time, 0, 5) : '',
+                $record->out_time ? substr($record->out_time, 0, 5) : '',
+                $workingHours
+            ];
+            $csv .= implode(',', $row) . "\n";
+        }
+        
+        $filename = 'attendance_export_' . ($request->start_date ?? 'all') . '_to_' . ($request->end_date ?? 'all') . '.csv';
+        
+        return response($csv)
+            ->header('Content-Type', 'text/csv')
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+    }
+
+    /**
+     * Delete attendance record (HR and Admin only)
      */
     public function destroy(Request $request, $id)
     {
         $user = $request->user();
         
-        // Only Procurement department users can delete
-        if (!$user->isProcurement()) {
-            return response()->json(['message' => 'Unauthorized. Only Procurement department can delete attendance records.'], 403);
+        // HR department and Admin users can delete
+        if (!$user->isHR() && !$user->isAdmin()) {
+            return response()->json(['message' => 'Unauthorized. Only HR department and Admin can delete attendance records.'], 403);
         }
         
         $attendance = Attendance::findOrFail($id);
@@ -939,7 +1049,7 @@ class AttendanceController extends Controller
         $attendance = Attendance::findOrFail($id);
         
         // Check permissions
-        if (!$user->isAdmin() && !$user->isProcurement()) {
+        if (!$user->isAdmin() && !$user->isHR()) {
             if ($user->isHod()) {
                 $managedDepts = $user->managed_department_ids ?? [];
                 $deptNames = \App\Models\Department::whereIn('id', $managedDepts)->pluck('name')->toArray();
@@ -960,6 +1070,55 @@ class AttendanceController extends Controller
     }
 
     /**
+     * Update an attendance record (HR and Admin only)
+     */
+    public function update(Request $request, $id)
+    {
+        $user = $request->user();
+        
+        // HR department and Admin users can update attendance
+        if (!$user->isHR() && !$user->isAdmin()) {
+            return response()->json(['message' => 'Unauthorized. Only HR department and Admin can update attendance records.'], 403);
+        }
+        
+        $attendance = Attendance::findOrFail($id);
+        
+        $validator = Validator::make($request->all(), [
+            'in_time' => 'nullable|date_format:H:i',
+            'out_time' => 'nullable|date_format:H:i',
+            'dept_name' => 'nullable|string|max:255',
+        ]);
+        
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+        
+        // Update only provided fields that have actual values
+        // Using filled() to check if the field has a non-empty value
+        if ($request->filled('in_time')) {
+            $attendance->in_time = $request->in_time;
+        }
+        if ($request->filled('out_time')) {
+            $attendance->out_time = $request->out_time;
+        }
+        if ($request->filled('dept_name')) {
+            $attendance->dept_name = $request->dept_name;
+        }
+        
+        $attendance->save();
+        
+        // Enrich with user info
+        $empUser = User::where('emp_code', $attendance->emp_code)->first();
+        $attendance->employee_name = $empUser ? $empUser->name : null;
+        $attendance->employee_id = $empUser ? $empUser->id : null;
+        
+        return response()->json([
+            'message' => 'Attendance record updated successfully',
+            'attendance' => $attendance
+        ]);
+    }
+
+    /**
      * Get attendance records for a specific user
      */
     public function userAttendance(Request $request, $userId)
@@ -969,7 +1128,7 @@ class AttendanceController extends Controller
         
         // Check permissions - Admin, Procurement, or HOD of user's department can view
         // Also allow users to view their own attendance
-        if (!$currentUser->isAdmin() && !$currentUser->isProcurement()) {
+        if (!$currentUser->isAdmin() && !$currentUser->isHR()) {
             if ($currentUser->id != $userId) {
                 if ($currentUser->isHod()) {
                     $managedDepts = $currentUser->managed_department_ids ?? [];

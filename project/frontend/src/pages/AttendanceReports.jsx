@@ -69,12 +69,53 @@ const AttendanceReports = () => {
           date: selectedDate,
           branch_id: selectedBranch || undefined,
         });
+        // Map the API response to a consistent format
+        if (data) {
+          data.records = (data.attendances || []).map(att => ({
+            id: att.id,
+            employee: att.user,
+            name: att.user?.name,
+            employee_id: att.user?.emp_code,
+            department: att.user?.department || att.department_name,
+            branch: att.branch,
+            branch_name: att.branch_name || att.branch?.name || (att.is_department_based ? 'Dept-based' : '-'),
+            check_in_time: att.check_in?.time,
+            check_out_time: att.check_out?.time,
+            check_in_latitude: att.check_in?.latitude,
+            check_in_longitude: att.check_in?.longitude,
+            check_out_latitude: att.check_out?.latitude,
+            check_out_longitude: att.check_out?.longitude,
+            working_hours: att.working_hours,
+            status: att.status,
+            is_late: att.is_late,
+            late_minutes: att.late_minutes,
+            is_department_based: att.is_department_based,
+          }));
+          // Note: Not including absent employees since this is GPS attendance only
+        }
       } else if (reportType === 'monthly') {
         data = await getMonthlyReport({
           month: selectedMonth,
           year: selectedYear,
           branch_id: selectedBranch || undefined,
         });
+        // Map monthly data to records format
+        if (data && data.employee_stats) {
+          data.records = data.employee_stats.map(emp => ({
+            id: emp.user?.id,
+            employee: emp.user,
+            name: emp.user?.name,
+            employee_id: emp.user?.emp_code,
+            branch: null,
+            branch_name: emp.user?.department || '-',
+            present_days: emp.present_days,
+            late_days: emp.late_days,
+            absent_days: emp.absent_days,
+            total_hours: emp.total_working_hours,
+            status: emp.present_days > 0 ? 'present' : 'absent',
+            attendance_rate: emp.attendance_rate,
+          }));
+        }
       }
       
       setReportData(data);
@@ -155,8 +196,8 @@ const AttendanceReports = () => {
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Attendance Reports</h1>
-        <p className="text-gray-600 mt-1">View and export attendance data for payroll processing</p>
+        <h1 className="text-2xl font-bold text-gray-900">GPS Attendance Reports</h1>
+        <p className="text-gray-600 mt-1">View and export GPS-based attendance data for payroll processing</p>
       </div>
 
       {/* Filters */}
@@ -332,43 +373,43 @@ const AttendanceReports = () => {
 
       {/* Summary Statistics */}
       {reportData?.summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <div className="flex items-center justify-between">
               <UsersIcon className="h-8 w-8 text-blue-500" />
-              <span className="text-2xl font-bold text-gray-900">{reportData.summary.total_employees || 0}</span>
+              <span className="text-2xl font-bold text-gray-900">{reportData.summary.total_gps_checkins || reportData.summary.total_present || 0}</span>
             </div>
-            <p className="text-sm text-gray-600 mt-2">Total Employees</p>
+            <p className="text-sm text-gray-600 mt-2">GPS Check-ins</p>
           </div>
           
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <div className="flex items-center justify-between">
               <CheckCircleIcon className="h-8 w-8 text-green-500" />
-              <span className="text-2xl font-bold text-green-600">{reportData.summary.present || 0}</span>
+              <span className="text-2xl font-bold text-green-600">{reportData.summary.checked_out || 0}</span>
             </div>
-            <p className="text-sm text-gray-600 mt-2">Present</p>
+            <p className="text-sm text-gray-600 mt-2">Checked Out</p>
           </div>
           
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <div className="flex items-center justify-between">
-              <ClockIcon className="h-8 w-8 text-yellow-500" />
-              <span className="text-2xl font-bold text-yellow-600">{reportData.summary.late || 0}</span>
+              <ClockIcon className="h-8 w-8 text-orange-500" />
+              <span className="text-2xl font-bold text-orange-600">{reportData.summary.checked_in_only || 0}</span>
             </div>
-            <p className="text-sm text-gray-600 mt-2">Late</p>
+            <p className="text-sm text-gray-600 mt-2">Still Working</p>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-sm border p-4">
+            <div className="flex items-center justify-between">
+              <ExclamationTriangleIcon className="h-8 w-8 text-yellow-500" />
+              <span className="text-2xl font-bold text-yellow-600">{reportData.summary.total_late || 0}</span>
+            </div>
+            <p className="text-sm text-gray-600 mt-2">Late Arrivals</p>
           </div>
           
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <div className="flex items-center justify-between">
               <XCircleIcon className="h-8 w-8 text-red-500" />
-              <span className="text-2xl font-bold text-red-600">{reportData.summary.absent || 0}</span>
-            </div>
-            <p className="text-sm text-gray-600 mt-2">Absent</p>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm border p-4">
-            <div className="flex items-center justify-between">
-              <ExclamationTriangleIcon className="h-8 w-8 text-orange-500" />
-              <span className="text-2xl font-bold text-orange-600">{reportData.summary.early_leave || 0}</span>
+              <span className="text-2xl font-bold text-red-600">{reportData.summary.total_early_leave || 0}</span>
             </div>
             <p className="text-sm text-gray-600 mt-2">Early Leave</p>
           </div>
@@ -376,9 +417,9 @@ const AttendanceReports = () => {
           <div className="bg-white rounded-xl shadow-sm border p-4">
             <div className="flex items-center justify-between">
               <ChartBarIcon className="h-8 w-8 text-purple-500" />
-              <span className="text-2xl font-bold text-purple-600">{reportData.summary.attendance_rate?.toFixed(1) || 0}%</span>
+              <span className="text-2xl font-bold text-purple-600">{reportData.summary.punctuality_rate?.toFixed(1) || 100}%</span>
             </div>
-            <p className="text-sm text-gray-600 mt-2">Attendance Rate</p>
+            <p className="text-sm text-gray-600 mt-2">On-Time Rate</p>
           </div>
         </div>
       )}
@@ -394,7 +435,10 @@ const AttendanceReports = () => {
                     Employee
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Branch
+                    Department
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Branch/Location
                   </th>
                   {reportType === 'daily' ? (
                     <>
@@ -449,41 +493,38 @@ const AttendanceReports = () => {
                             <img src={record.employee.profile_picture} alt="" className="h-10 w-10 rounded-full" />
                           ) : (
                             <span className="text-gray-500 font-medium">
-                              {record.employee?.name?.charAt(0) || '?'}
+                              {record.employee?.name?.charAt(0) || record.name?.charAt(0) || '?'}
                             </span>
                           )}
                         </div>
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-900">{record.employee?.name || record.name}</div>
-                          <div className="text-sm text-gray-500">{record.employee?.employee_id || record.employee_id}</div>
+                          <div className="text-sm text-gray-500">{record.employee?.emp_code || record.employee_id}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {record.branch?.name || record.branch_name || '-'}
+                      {record.department || record.employee?.department || '-'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {record.branch_name || record.branch?.name || '-'}
                     </td>
                     {reportType === 'daily' ? (
                       <>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {record.check_in_time || record.check_in?.time || record.in_time || '-'}
+                          {record.check_in_time || '-'}
                         </td>
                         {showLocations && (
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            {(record.check_in?.latitude || record.check_in_latitude) ? (
+                            {record.check_in_latitude ? (
                               <button
-                                onClick={() => openInMaps(
-                                  record.check_in?.latitude || record.check_in_latitude,
-                                  record.check_in?.longitude || record.check_in_longitude
-                                )}
+                                onClick={() => openInMaps(record.check_in_latitude, record.check_in_longitude)}
                                 className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
                                 title="Open in Google Maps"
                               >
                                 <MapPinIcon className="h-4 w-4 mr-1" />
                                 <span className="text-xs">
-                                  {formatLocation(
-                                    record.check_in?.latitude || record.check_in_latitude,
-                                    record.check_in?.longitude || record.check_in_longitude
-                                  )}
+                                  {formatLocation(record.check_in_latitude, record.check_in_longitude)}
                                 </span>
                               </button>
                             ) : (
@@ -492,25 +533,19 @@ const AttendanceReports = () => {
                           </td>
                         )}
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {record.check_out_time || record.check_out?.time || record.out_time || '-'}
+                          {record.check_out_time || '-'}
                         </td>
                         {showLocations && (
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            {(record.check_out?.latitude || record.check_out_latitude) ? (
+                            {record.check_out_latitude ? (
                               <button
-                                onClick={() => openInMaps(
-                                  record.check_out?.latitude || record.check_out_latitude,
-                                  record.check_out?.longitude || record.check_out_longitude
-                                )}
+                                onClick={() => openInMaps(record.check_out_latitude, record.check_out_longitude)}
                                 className="flex items-center text-blue-600 hover:text-blue-800 hover:underline"
                                 title="Open in Google Maps"
                               >
                                 <MapPinIcon className="h-4 w-4 mr-1" />
                                 <span className="text-xs">
-                                  {formatLocation(
-                                    record.check_out?.latitude || record.check_out_latitude,
-                                    record.check_out?.longitude || record.check_out_longitude
-                                  )}
+                                  {formatLocation(record.check_out_latitude, record.check_out_longitude)}
                                 </span>
                               </button>
                             ) : (
@@ -519,7 +554,7 @@ const AttendanceReports = () => {
                           </td>
                         )}
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {record.working_hours || record.total_hours || '-'}
+                          {record.working_hours || '-'}
                         </td>
                       </>
                     ) : (

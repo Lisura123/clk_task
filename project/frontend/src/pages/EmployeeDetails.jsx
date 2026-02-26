@@ -242,7 +242,14 @@ export default function EmployeeDetails() {
     });
   };
 
+  // Check if current user is from HR department
+  const isHR = (currentUser?.department_name?.toLowerCase() === 'hr') || 
+               (currentUser?.department?.toLowerCase() === 'hr') ||
+               (currentUser?.department_id == 12) ||
+               (currentUser?.departmentRelation?.name?.toLowerCase() === 'hr');
+
   const canEdit = currentUser?.role === 'admin' || 
+    isHR ||
     (currentUser?.role === 'hod' && employee?.department_id && 
      currentUser?.managed_department_ids?.includes(employee.department_id));
 

@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\GpsAttendanceController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\AttendanceReportController;
 use App\Http\Controllers\Api\AttendanceCorrectionController;
+use App\Http\Controllers\Api\AttendanceRequestController;
 
 /*
 |--------------------------------------------------------------------------
@@ -180,10 +181,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/leave-types/{id}', [LeaveController::class, 'deleteLeaveType']); // Super admin only
 
     Route::get('/leave-balances', [LeaveController::class, 'getMyBalances']);
+    Route::get('/leave-balances/all', [LeaveController::class, 'getAllBalances']); // Admin/HR - view all employee balances with filters
     Route::get('/leave-balances/user/{userId}', [LeaveController::class, 'getUserBalances']); // Admin only
     Route::put('/leave-balances/{balanceId}', [LeaveController::class, 'updateBalance']); // Admin only
 
-    Route::get('/leaves', [LeaveController::class, 'getAllLeaves']); // Admin only
+    Route::get('/leaves', [LeaveController::class, 'getAllLeaves']); // Admin/HOD/HR
+    Route::get('/leaves/approved', [LeaveController::class, 'getApprovedLeaves']); // HR can view approved leaves
     Route::get('/leaves/my', [LeaveController::class, 'getMyLeaves']);
     Route::get('/leaves/user/{userId}', [LeaveController::class, 'getUserLeaves']); // Admin/HOD/Senior only
     Route::get('/leaves/pending', [LeaveController::class, 'getPendingLeaves']); // Admin only
@@ -206,10 +209,33 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/attendance', [AttendanceController::class, 'index']);
     Route::get('/attendance/statistics', [AttendanceController::class, 'statistics']);
     Route::get('/attendance/template', [AttendanceController::class, 'downloadTemplate']);
+    Route::get('/attendance/export', [AttendanceController::class, 'export']); // Export attendance to CSV
     Route::post('/attendance/upload', [AttendanceController::class, 'upload']); // Procurement/Admin only
     Route::get('/users/{userId}/attendance', [AttendanceController::class, 'userAttendance']); // Get attendance for specific user
     Route::get('/attendance/{id}', [AttendanceController::class, 'show']);
+    Route::put('/attendance/{id}', [AttendanceController::class, 'update']); // Procurement only - update record
     Route::delete('/attendance/{id}', [AttendanceController::class, 'destroy']); // Procurement/Admin only
+
+    // =====================================================
+    // ATTENDANCE REQUEST SYSTEM (Out-of-Office Attendance)
+    // =====================================================
+    Route::prefix('attendance-requests')->group(function () {
+        // Employee routes
+        Route::get('/my', [AttendanceRequestController::class, 'myRequests']); // Get my requests
+        Route::post('/', [AttendanceRequestController::class, 'store']); // Submit new request
+        Route::delete('/{id}', [AttendanceRequestController::class, 'destroy']); // Withdraw pending request
+        Route::get('/statistics', [AttendanceRequestController::class, 'statistics']); // Get stats
+        
+        // HOD routes (approval)
+        Route::get('/pending', [AttendanceRequestController::class, 'pendingForApproval']); // Get pending requests
+        Route::post('/{id}/approve', [AttendanceRequestController::class, 'approve']); // Approve request
+        Route::post('/{id}/reject', [AttendanceRequestController::class, 'reject']); // Reject request
+        
+        // Procurement routes (sync to attendance)
+        Route::get('/approved', [AttendanceRequestController::class, 'approvedForProcurement']); // Get approved requests
+        Route::post('/{id}/sync', [AttendanceRequestController::class, 'markAsSynced']); // Mark as synced
+        Route::post('/{id}/add-to-attendance', [AttendanceRequestController::class, 'addToAttendance']); // Add to attendance table
+    });
 
     // =====================================================
     // GPS ATTENDANCE SYSTEM ROUTES

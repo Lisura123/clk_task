@@ -223,24 +223,38 @@ class GpsValidationService
     /**
      * Validate check-out time against settings
      * 
-     * @param Branch $branch The branch
+     * @param Branch|null $branch The branch (null for department-based attendance)
      * @param Attendance $attendance The attendance record
      * @param Carbon|null $time The time to validate (defaults to now)
+     * @param \App\Models\DepartmentAttendanceSetting|null $deptSettings Department settings (for department-based attendance)
      * @return array Validation result
      */
-    public function validateCheckOutTime(Branch $branch, Attendance $attendance, ?Carbon $time = null): array
+    public function validateCheckOutTime(?Branch $branch, Attendance $attendance, ?Carbon $time = null, ?\App\Models\DepartmentAttendanceSetting $deptSettings = null): array
     {
         $time = $time ?? now();
-        $settings = $branch->getEffectiveTimeSettings($time->toDateString());
-
-        if (!$settings) {
+        
+        // Get settings from branch or department
+        if ($branch) {
+            $settings = $branch->getEffectiveTimeSettings($time->toDateString());
+            if (!$settings) {
+                $checkOutStart = Carbon::parse('17:00:00');
+                $checkOutEnd = Carbon::parse('19:00:00');
+                $minimumHours = 8.0;
+            } else {
+                $checkOutStart = Carbon::parse($settings->check_out_start_time);
+                $checkOutEnd = Carbon::parse($settings->check_out_end_time);
+                $minimumHours = $settings->minimum_working_hours;
+            }
+        } elseif ($deptSettings) {
+            // Department-based attendance
+            $checkOutStart = Carbon::parse($deptSettings->work_end_time ?? '17:00:00');
+            $checkOutEnd = Carbon::parse($deptSettings->work_end_time ?? '17:00:00')->addHours(2);
+            $minimumHours = $deptSettings->minimum_working_hours ?? 8.0;
+        } else {
+            // Default values
             $checkOutStart = Carbon::parse('17:00:00');
             $checkOutEnd = Carbon::parse('19:00:00');
             $minimumHours = 8.0;
-        } else {
-            $checkOutStart = Carbon::parse($settings->check_out_start_time);
-            $checkOutEnd = Carbon::parse($settings->check_out_end_time);
-            $minimumHours = $settings->minimum_working_hours;
         }
 
         // Set dates to today for comparison
@@ -291,7 +305,11 @@ class GpsValidationService
 
         return Attendance::where('user_id', $user->id)
             ->whereDate('date', $date)
-            ->where('attendance_method', Attendance::METHOD_GPS_APP)
+            ->where(function ($query) {
+                // Check for GPS app attendance OR department-based attendance
+                $query->where('attendance_method', Attendance::METHOD_GPS_APP)
+                      ->orWhere('is_department_based', true);
+            })
             ->first();
     }
 
@@ -401,8 +419,8 @@ class GpsValidationService
     public function createDepartmentCheckIn(
         User $user,
         int $departmentId,
-        float $latitude,
-        float $longitude,
+        ?float $latitude = null,
+        ?float $longitude = null,
         ?float $gpsAccuracy = null,
         array $deviceInfo = [],
         ?string $ipAddress = null,
@@ -432,8 +450,8 @@ class GpsValidationService
                     $lateByMinutes = $now->diffInMinutes($workStartTime);
                 }
 
-                // Calculate distance if location is configured
-                if ($deptSettings->hasLocationConfigured()) {
+                // Calculate distance if location is configured and coordinates are provided
+                if ($latitude !== null && $longitude !== null && $deptSettings->hasLocationConfigured()) {
                     $distanceMeters = $this->calculateDistance(
                         $latitude,
                         $longitude,
@@ -446,6 +464,7 @@ class GpsValidationService
             // Create attendance record
             $attendance = Attendance::create([
                 'user_id' => $user->id,
+                'emp_code' => $user->emp_code ?? $user->id, // Required field
                 'branch_id' => null, // No physical branch for department-based attendance
                 'department_id' => $departmentId,
                 'date' => $now->toDateString(),
@@ -462,6 +481,7 @@ class GpsValidationService
                 'verified_branch_address' => $deptSettings?->address,
                 'verified_branch_city' => $deptSettings?->city,
                 'attendance_status' => $isLate ? 'late' : 'present',
+                'attendance_method' => Attendance::METHOD_GPS_APP, // Set method for GPS attendance
                 'location_verified' => true,
                 'at_assigned_location' => true,
                 'is_late' => $isLate,
@@ -471,7 +491,7 @@ class GpsValidationService
 
             // Log the check-in
             $this->logAudit(
-                AttendanceAuditLog::ACTION_CHECK_IN,
+                AttendanceAuditLog::ACTION_CHECK_IN_SUCCESS,
                 $user,
                 $attendance,
                 null,

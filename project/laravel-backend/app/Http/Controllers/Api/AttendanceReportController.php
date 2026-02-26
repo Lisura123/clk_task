@@ -18,6 +18,29 @@ use OpenSpout\Writer\XLSX\Options;
 class AttendanceReportController extends Controller
 {
     /**
+     * Helper to safely format time (handles both string and Carbon objects)
+     */
+    private function formatTime($time, string $format = 'H:i:s'): ?string
+    {
+        if (!$time) {
+            return null;
+        }
+        
+        if (is_string($time)) {
+            // Already a string, just return the appropriate portion
+            if ($format === 'H:i:s' && strlen($time) >= 8) {
+                return substr($time, 0, 8);
+            } elseif ($format === 'H:i' && strlen($time) >= 5) {
+                return substr($time, 0, 5);
+            }
+            return $time;
+        }
+        
+        // It's a Carbon object
+        return $time->format($format);
+    }
+    
+    /**
      * Get daily attendance report
      */
     public function dailyReport(Request $request): JsonResponse
@@ -49,37 +72,21 @@ class AttendanceReportController extends Controller
 
         $attendances = $query->get();
 
-        // Get all branch employees for the selected branch(es)
-        $branchEmployeesQuery = DB::table('user_branch_assignments')
-            ->join('users', 'users.id', '=', 'user_branch_assignments.user_id')
-            ->where('user_branch_assignments.status', 'active')
-            ->where('user_branch_assignments.is_primary_branch', true)
-            ->select('users.id', 'users.name', 'users.username', 'users.emp_code', 'user_branch_assignments.branch_id');
-
-        if (isset($validated['branch_id'])) {
-            $branchEmployeesQuery->where('user_branch_assignments.branch_id', $validated['branch_id']);
-        }
-
-        $branchEmployees = $branchEmployeesQuery->get();
-
-        // Find absent employees
-        $presentUserIds = $attendances->pluck('user_id')->toArray();
-        $absentEmployees = $branchEmployees->filter(fn($e) => !in_array($e->id, $presentUserIds));
-
-        // Summary statistics
+        // GPS-specific summary statistics (based on actual GPS check-ins, not branch employees)
+        $totalGpsCheckIns = $attendances->count();
+        $checkedInOnly = $attendances->filter(fn($a) => $a->hasCheckedIn() && !$a->hasCheckedOut())->count();
+        $checkedOut = $attendances->filter(fn($a) => $a->hasCheckedIn() && $a->hasCheckedOut())->count();
+        
         $summary = [
             'date' => $date,
-            'total_employees' => $branchEmployees->count(),
-            'total_present' => $attendances->whereIn('attendance_status', ['present', 'late', 'early_leave'])->count(),
+            'total_gps_checkins' => $totalGpsCheckIns,
+            'total_present' => $attendances->whereIn('attendance_status', ['present', 'late', 'early_leave', 'checked_in'])->count(),
             'total_late' => $attendances->where('is_late', true)->count(),
-            'total_absent' => $absentEmployees->count(),
             'total_early_leave' => $attendances->where('attendance_status', 'early_leave')->count(),
-            'checked_in_only' => $attendances->filter(fn($a) => $a->hasCheckedIn() && !$a->hasCheckedOut())->count(),
-            'attendance_rate' => $branchEmployees->count() > 0
-                ? round(($attendances->count() / $branchEmployees->count()) * 100, 1)
-                : 0,
-            'punctuality_rate' => $attendances->count() > 0
-                ? round((($attendances->count() - $attendances->where('is_late', true)->count()) / $attendances->count()) * 100, 1)
+            'checked_in_only' => $checkedInOnly,
+            'checked_out' => $checkedOut,
+            'punctuality_rate' => $totalGpsCheckIns > 0
+                ? round((($totalGpsCheckIns - $attendances->where('is_late', true)->count()) / $totalGpsCheckIns) * 100, 1)
                 : 100,
         ];
 
@@ -89,19 +96,29 @@ class AttendanceReportController extends Controller
             $branches = Branch::where('is_active', true)->get();
             foreach ($branches as $branch) {
                 $branchAttendances = $attendances->where('branch_id', $branch->id);
-                $branchEmployeeCount = $branchEmployees->where('branch_id', $branch->id)->count();
-
+                
+                if ($branchAttendances->count() > 0) {
+                    $branchBreakdown[] = [
+                        'branch_id' => $branch->id,
+                        'branch_name' => $branch->name,
+                        'branch_code' => $branch->code,
+                        'gps_checkins' => $branchAttendances->count(),
+                        'late' => $branchAttendances->where('is_late', true)->count(),
+                        'checked_out' => $branchAttendances->filter(fn($a) => $a->hasCheckedOut())->count(),
+                    ];
+                }
+            }
+            
+            // Add department-based check-ins
+            $deptBasedAttendances = $attendances->where('is_department_based', true);
+            if ($deptBasedAttendances->count() > 0) {
                 $branchBreakdown[] = [
-                    'branch_id' => $branch->id,
-                    'branch_name' => $branch->name,
-                    'branch_code' => $branch->code,
-                    'total_employees' => $branchEmployeeCount,
-                    'present' => $branchAttendances->count(),
-                    'late' => $branchAttendances->where('is_late', true)->count(),
-                    'absent' => $branchEmployeeCount - $branchAttendances->count(),
-                    'attendance_rate' => $branchEmployeeCount > 0
-                        ? round(($branchAttendances->count() / $branchEmployeeCount) * 100, 1)
-                        : 0,
+                    'branch_id' => null,
+                    'branch_name' => 'Department-based',
+                    'branch_code' => 'DEPT',
+                    'gps_checkins' => $deptBasedAttendances->count(),
+                    'late' => $deptBasedAttendances->where('is_late', true)->count(),
+                    'checked_out' => $deptBasedAttendances->filter(fn($a) => $a->hasCheckedOut())->count(),
                 ];
             }
         }
@@ -110,29 +127,47 @@ class AttendanceReportController extends Controller
             'summary' => $summary,
             'branch_breakdown' => $branchBreakdown,
             'attendances' => $attendances->map(function ($attendance) {
+                // Handle in_time - could be string or Carbon
+                $inTime = $attendance->in_time;
+                if ($inTime && !is_string($inTime)) {
+                    $inTime = $inTime->format('H:i:s');
+                } elseif (is_string($inTime) && strlen($inTime) > 5) {
+                    $inTime = substr($inTime, 0, 8); // Get HH:MM:SS
+                }
+                
+                // Handle out_time - could be string or Carbon
+                $outTime = $attendance->out_time;
+                if ($outTime && !is_string($outTime)) {
+                    $outTime = $outTime->format('H:i:s');
+                } elseif (is_string($outTime) && strlen($outTime) > 5) {
+                    $outTime = substr($outTime, 0, 8); // Get HH:MM:SS
+                }
+                
                 return [
                     'id' => $attendance->id,
                     'date' => $attendance->date->format('Y-m-d'),
                     'user' => [
-                        'id' => $attendance->user->id,
-                        'name' => $attendance->user->name,
-                        'username' => $attendance->user->username,
-                        'emp_code' => $attendance->user->emp_code,
-                        'department' => $attendance->user->departmentRelation?->name,
+                        'id' => $attendance->user?->id,
+                        'name' => $attendance->user?->name,
+                        'username' => $attendance->user?->username,
+                        'emp_code' => $attendance->user?->emp_code,
+                        'department' => $attendance->user?->departmentRelation?->name ?? $attendance->dept_name,
                     ],
-                    'branch' => [
+                    'branch' => $attendance->branch ? [
                         'id' => $attendance->branch->id,
                         'name' => $attendance->branch->name,
                         'code' => $attendance->branch->code,
-                    ],
+                    ] : null,
+                    'branch_name' => $attendance->branch?->name ?? ($attendance->is_department_based ? 'Department-based' : null),
+                    'department_name' => $attendance->dept_name ?? $attendance->user?->departmentRelation?->name,
                     'check_in' => [
-                        'time' => $attendance->in_time?->format('H:i:s'),
+                        'time' => $inTime,
                         'latitude' => $attendance->check_in_latitude,
                         'longitude' => $attendance->check_in_longitude,
                         'distance_meters' => $attendance->check_in_distance_meters,
                     ],
                     'check_out' => [
-                        'time' => $attendance->out_time?->format('H:i:s'),
+                        'time' => $outTime,
                         'latitude' => $attendance->check_out_latitude,
                         'longitude' => $attendance->check_out_longitude,
                         'distance_meters' => $attendance->check_out_distance_meters,
@@ -142,16 +177,9 @@ class AttendanceReportController extends Controller
                     'late_minutes' => $attendance->late_minutes,
                     'working_hours' => $attendance->working_hours,
                     'validation_status' => $attendance->gps_validation_status ?? $attendance->validation_status,
+                    'is_department_based' => $attendance->is_department_based,
                 ];
             }),
-            'absent_employees' => $absentEmployees->map(function ($employee) {
-                return [
-                    'id' => $employee->id,
-                    'name' => $employee->name,
-                    'username' => $employee->username,
-                    'emp_code' => $employee->emp_code,
-                ];
-            })->values(),
         ]);
     }
 
@@ -318,8 +346,8 @@ class AttendanceReportController extends Controller
                         'name' => $attendance->branch->name,
                         'code' => $attendance->branch->code,
                     ],
-                    'check_in_time' => $attendance->in_time?->format('H:i:s'),
-                    'check_out_time' => $attendance->out_time?->format('H:i:s'),
+                    'check_in_time' => $this->formatTime($attendance->in_time),
+                    'check_out_time' => $this->formatTime($attendance->out_time),
                     'working_hours' => $attendance->working_hours,
                     'status' => $attendance->attendance_status,
                     'is_late' => $attendance->is_late,
@@ -404,13 +432,13 @@ class AttendanceReportController extends Controller
 
         $attendances = $query->get();
 
-        // Header row - Requested format: Date, EmpCode, FP Code, NameDept, Name, In, Out (+ locations)
+        // Header row - Format: Date, Emp Code, Employee, FP Code, Department, In, Out (+ locations for GPS)
         $headers = [
             'Date',
-            'EmpCode',
+            'Emp Code',
+            'Employee',
             'FP Code',
-            'NameDept',
-            'Name',
+            'Department',
             'Branch',
             'In',
         ];
@@ -436,11 +464,11 @@ class AttendanceReportController extends Controller
             $row = [
                 $attendance->date->format('Y-m-d'),
                 $attendance->emp_code ?? $attendance->user->emp_code ?? $attendance->user_id,
+                $attendance->user->name ?? '',
                 $attendance->fp_code ?? '',
                 $attendance->dept_name ?? $attendance->user->departmentRelation?->name ?? '',
-                $attendance->user->name ?? '',
-                $attendance->branch->name ?? '',
-                $attendance->in_time?->format('H:i') ?? '',
+                $attendance->branch?->name ?? ($attendance->is_department_based ? 'Dept-based' : ''),
+                $this->formatTime($attendance->in_time, 'H:i') ?? '',
             ];
             
             if ($includeLocations) {
@@ -449,7 +477,7 @@ class AttendanceReportController extends Controller
                 $row[] = $attendance->check_in_distance_meters ?? '';
             }
             
-            $row[] = $attendance->out_time?->format('H:i') ?? '';
+            $row[] = $this->formatTime($attendance->out_time, 'H:i') ?? '';
             
             if ($includeLocations) {
                 $row[] = $attendance->check_out_latitude ?? '';
@@ -491,10 +519,10 @@ class AttendanceReportController extends Controller
         // Header row
         $headers = [
             'Date',
-            'EmpCode',
+            'Emp Code',
+            'Employee',
             'FP Code',
-            'NameDept',
-            'Name',
+            'Department',
             'In',
         ];
         
@@ -519,10 +547,10 @@ class AttendanceReportController extends Controller
             $row = [
                 $attendance->date->format('Y-m-d'),
                 $attendance->emp_code ?? $attendance->user->emp_code ?? $attendance->user_id,
+                $attendance->user->name ?? '',
                 $attendance->fp_code ?? '',
                 $attendance->dept_name ?? $attendance->user->departmentRelation?->name ?? '',
-                $attendance->user->name ?? '',
-                $attendance->in_time?->format('H:i') ?? '',
+                $this->formatTime($attendance->in_time, 'H:i') ?? '',
             ];
             
             if ($includeLocations) {
@@ -531,7 +559,7 @@ class AttendanceReportController extends Controller
                 $row[] = $attendance->check_in_distance_meters ?? '';
             }
             
-            $row[] = $attendance->out_time?->format('H:i') ?? '';
+            $row[] = $this->formatTime($attendance->out_time, 'H:i') ?? '';
             
             if ($includeLocations) {
                 $row[] = $attendance->check_out_latitude ?? '';
@@ -587,8 +615,8 @@ class AttendanceReportController extends Controller
                 $attendance->date->format('Y-m-d'),
                 $attendance->date->format('l'),
                 $attendance->branch->name,
-                $attendance->in_time?->format('H:i:s') ?? '-',
-                $attendance->out_time?->format('H:i:s') ?? '-',
+                $this->formatTime($attendance->in_time) ?? '-',
+                $this->formatTime($attendance->out_time) ?? '-',
                 $attendance->working_hours ?? '-',
                 ucfirst($attendance->attendance_status ?? '-'),
                 $attendance->is_late ? 'Yes' : 'No',
@@ -891,8 +919,8 @@ class AttendanceReportController extends Controller
 
         $attendances = $query->get();
 
-        // Build headers
-        $headers = ['Date', 'EmpCode', 'FP Code', 'Department', 'Name', 'Branch', 'In'];
+        // Build headers - Format: Date, Emp Code, Employee, FP Code, Department, Branch, In, Out
+        $headers = ['Date', 'Emp Code', 'Employee', 'FP Code', 'Department', 'Branch', 'In'];
         
         if ($includeLocations) {
             $headers = array_merge($headers, ['Check-In Lat', 'Check-In Lng', 'Distance (m)']);
@@ -910,11 +938,11 @@ class AttendanceReportController extends Controller
             $row = [
                 $attendance->date->format('Y-m-d'),
                 $attendance->emp_code ?? $attendance->user->emp_code ?? $attendance->user_id,
+                $attendance->user->name ?? '',
                 $attendance->fp_code ?? '',
                 $attendance->dept_name ?? $attendance->user->departmentRelation?->name ?? '',
-                $attendance->user->name ?? '',
-                $attendance->branch->name ?? '',
-                $attendance->in_time?->format('H:i') ?? '',
+                $attendance->branch?->name ?? ($attendance->is_department_based ? 'Dept-based' : ''),
+                $this->formatTime($attendance->in_time, 'H:i') ?? '',
             ];
             
             if ($includeLocations) {
@@ -923,7 +951,7 @@ class AttendanceReportController extends Controller
                 $row[] = $attendance->check_in_distance_meters ?? '';
             }
             
-            $row[] = $attendance->out_time?->format('H:i') ?? '';
+            $row[] = $this->formatTime($attendance->out_time, 'H:i') ?? '';
             
             if ($includeLocations) {
                 $row[] = $attendance->check_out_latitude ?? '';
@@ -963,8 +991,8 @@ class AttendanceReportController extends Controller
 
         $attendances = $query->get();
 
-        // Build headers
-        $headers = ['Date', 'EmpCode', 'FP Code', 'Department', 'Name', 'In'];
+        // Build headers - Format: Date, Emp Code, Employee, FP Code, Department, In, Out
+        $headers = ['Date', 'Emp Code', 'Employee', 'FP Code', 'Department', 'In'];
         
         if ($includeLocations) {
             $headers = array_merge($headers, ['Check-In Lat', 'Check-In Lng', 'Distance (m)']);
@@ -982,10 +1010,10 @@ class AttendanceReportController extends Controller
             $row = [
                 $attendance->date->format('Y-m-d'),
                 $attendance->emp_code ?? $attendance->user->emp_code ?? $attendance->user_id,
+                $attendance->user->name ?? '',
                 $attendance->fp_code ?? '',
                 $attendance->dept_name ?? $attendance->user->departmentRelation?->name ?? '',
-                $attendance->user->name ?? '',
-                $attendance->in_time?->format('H:i') ?? '',
+                $this->formatTime($attendance->in_time, 'H:i') ?? '',
             ];
             
             if ($includeLocations) {
@@ -994,7 +1022,7 @@ class AttendanceReportController extends Controller
                 $row[] = $attendance->check_in_distance_meters ?? '';
             }
             
-            $row[] = $attendance->out_time?->format('H:i') ?? '';
+            $row[] = $this->formatTime($attendance->out_time, 'H:i') ?? '';
             
             if ($includeLocations) {
                 $row[] = $attendance->check_out_latitude ?? '';

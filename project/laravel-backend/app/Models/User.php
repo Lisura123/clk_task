@@ -167,6 +167,22 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
+     * Get leave balances for this user
+     */
+    public function leaveBalances(): HasMany
+    {
+        return $this->hasMany(LeaveBalance::class);
+    }
+
+    /**
+     * Get leave requests for this user
+     */
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    /**
      * Get active branch assignments
      */
     public function activeBranches(): BelongsToMany
@@ -330,20 +346,39 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
-     * Check if user belongs to Procurement department
+     * Check if user belongs to HR department (ID 12)
+     */
+    public function isHR(): bool
+    {
+        // Check by department_id first (most reliable)
+        if ($this->department_id == 12) {
+            return true;
+        }
+        // Check by department relationship
+        if ($this->departmentRelation) {
+            return strtolower($this->departmentRelation->name) === 'hr';
+        }
+        // Fallback to department name field
+        return strtolower($this->department ?? '') === 'hr';
+    }
+
+    /**
+     * Check if user belongs to Procurement department (kept for backward compatibility)
      */
     public function isProcurement(): bool
     {
         // Check by department relationship first
         if ($this->departmentRelation) {
-            return strtolower($this->departmentRelation->name) === 'procurement';
+            return strtolower($this->departmentRelation->name) === 'procurement' || 
+                   strtolower($this->departmentRelation->name) === 'procrument';
         }
         // Fallback to department name field
-        return strtolower($this->department ?? '') === 'procurement';
+        $dept = strtolower($this->department ?? '');
+        return $dept === 'procurement' || $dept === 'procrument';
     }
 
     /**
-     * Check if user can view employee details (admin, hod, or procurement)
+     * Check if user can view employee details (admin, hod, or HR)
      */
     public function canViewEmployeeDetails($targetUser = null): bool
     {
@@ -352,8 +387,8 @@ class User extends Authenticatable implements FilamentUser
             return true;
         }
         
-        // Procurement department users can view all employees
-        if ($this->isProcurement()) {
+        // HR department users can view all employees
+        if ($this->isHR()) {
             return true;
         }
         
@@ -470,8 +505,8 @@ class User extends Authenticatable implements FilamentUser
             return true;
         }
 
-        // Allow Procurement department employees to view reports
-        if ($this->isProcurement()) {
+        // Allow HR department employees to view reports
+        if ($this->isHR()) {
             return true;
         }
 
@@ -479,11 +514,16 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
-     * Check if user can manage attendance (admin/procurement only)
+     * Check if user can manage attendance (admin/HR department)
      */
     public function canManageAttendance(): bool
     {
         if ($this->isAdmin()) {
+            return true;
+        }
+
+        // Check if user is from HR department
+        if ($this->isHR()) {
             return true;
         }
 

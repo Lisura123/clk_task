@@ -89,6 +89,7 @@ export const departmentAPI = {
   getStats: (id) => api.get(`/departments/${id}/statistics`),
   getEmployees: (id, params) => api.get(`/departments/${id}/employees`, { params }),
   create: (data) => api.post('/departments', data),
+  createDepartment: (data) => api.post('/departments', data),
   update: (id, data) => api.put(`/departments/${id}`, data),
   updateDepartment: (id, data) => api.put(`/departments/${id}`, data),
   delete: (id) => api.delete(`/departments/${id}`),
@@ -216,6 +217,7 @@ export const leaveAPI = {
   
   // Leave Balances
   getMyBalances: () => api.get('/leave-balances'),
+  getAllBalances: (params) => api.get('/leave-balances/all', { params }), // Admin/HR - view all employee leave balances
   getUserBalances: (userId) => api.get(`/users/${userId}/leave-balances`),
   updateBalance: (id, data) => api.put(`/leave-balances/${id}`, data),
   

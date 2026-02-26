@@ -98,9 +98,9 @@ export default function Users() {
       return true;
     }
     
-    // Procurement department users can view all
+    // HR department users can view all
     const userDeptName = user?.department_name?.toLowerCase() || user?.department?.toLowerCase() || '';
-    if (userDeptName === 'procurement') {
+    if (userDeptName === 'hr' || user?.department_id == 12) {
       return true;
     }
     
@@ -495,15 +495,15 @@ export default function Users() {
             const isMultiDeptHOD = user.role === 'hod' && managedIds.length > 1;
             const isSingleDeptHOD = user.role === 'hod' && managedIds.length <= 1;
             
-            // Check if user is from Procurement department (case-insensitive, partial match)
+            // Check if user is from HR department (ID 12)
             // Use the same logic as DashboardLayout for consistency
-            const isProcurement = (user?.department_name?.toLowerCase()?.includes('procurement')) || 
-                                  (user?.department?.toLowerCase()?.includes('procurement')) ||
-                                  (user?.department_id == 7) || (user?.department_id == 8) ||  // Procurement department ID fallback
-                                  (user?.departmentRelation?.name?.toLowerCase()?.includes('procurement'));
+            const isHR = (user?.department_name?.toLowerCase() === 'hr') || 
+                         (user?.department?.toLowerCase() === 'hr') ||
+                         (user?.department_id == 12) ||  // HR department ID
+                         (user?.departmentRelation?.name?.toLowerCase() === 'hr');
             
             // Determine if user can see all departments
-            const canSeeAllDepts = user.role === 'admin' || isProcurement;
+            const canSeeAllDepts = user.role === 'admin' || isHR;
             
             return (
               <select
@@ -512,7 +512,7 @@ export default function Users() {
                 disabled={isSingleDeptHOD && !canSeeAllDepts}
                 className="w-full px-2 sm:px-4 py-2 text-xs sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-100 disabled:cursor-not-allowed appearance-none bg-white"
               >
-                {/* Show 'All' option for admins, procurement users, or multi-dept HODs */}
+                {/* Show 'All' option for admins, HR users, or multi-dept HODs */}
                 {(canSeeAllDepts || isMultiDeptHOD) && (
                   <option value="all">
                     {isMultiDeptHOD && !canSeeAllDepts ? 'All My Departments' : 'All Departments'}
@@ -520,7 +520,7 @@ export default function Users() {
                 )}
                 {departments
                   .filter(dept => {
-                    // Admins and Procurement users can see all departments
+                    // Admins and HR users can see all departments
                     if (canSeeAllDepts) return true;
                     // HODs can only see their managed departments
                     if (user.role === 'hod') {

@@ -142,7 +142,11 @@ export const useConfirm = () => {
   if (!context) {
     throw new Error('useConfirm must be used within a ConfirmProvider');
   }
-  return context;
+  // Return an object with show method for compatibility
+  return {
+    show: context,
+    confirm: context
+  };
 };
 
 export default ConfirmProvider;

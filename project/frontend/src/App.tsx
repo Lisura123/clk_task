@@ -28,12 +28,14 @@ import TaskDetails from './pages/TaskDetails';
 import EmployeeDetails from './pages/EmployeeDetails';
 import MyLeaves from './pages/MyLeaves';
 import LeaveApproval from './pages/LeaveApproval';
+import LeaveBalances from './pages/LeaveBalances';
 import LeaveSettings from './pages/LeaveSettings';
 import Attendance from './pages/Attendance';
 import GpsAttendance from './pages/GpsAttendance';
 import BranchManagement from './pages/BranchManagement';
 import AttendanceReports from './pages/AttendanceReports';
 import AttendanceAdmin from './pages/AttendanceAdmin';
+import AttendanceRequests from './pages/AttendanceRequests';
 import useAuthStore from './store/authStore';
 
 function DashboardRouter() {
@@ -238,22 +240,42 @@ function App() {
             }
           />
 
-          {/* Leave Settings - Admin Only */}
+          {/* Leave Settings - Admin and HR */}
           <Route
             path="dashboard/leave-settings"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']} requireHROrAdmin={true}>
                 <LeaveSettings />
               </ProtectedRoute>
             }
           />
 
-          {/* Attendance Management - Procurement Only */}
+          {/* Leave Balances - Admin and HR */}
+          <Route
+            path="dashboard/leave-balances"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']} requireHROrAdmin={true}>
+                <LeaveBalances />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Attendance Management */}
           <Route
             path="dashboard/attendance"
             element={
               <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
                 <Attendance />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Attendance Requests - Out of Office Work */}
+          <Route
+            path="dashboard/attendance-requests"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']}>
+                <AttendanceRequests />
               </ProtectedRoute>
             }
           />
@@ -278,21 +300,21 @@ function App() {
             }
           />
 
-          {/* Attendance Reports - Admin/Procurement Only */}
+          {/* Attendance Reports - Admin/HR Only */}
           <Route
             path="dashboard/attendance-reports"
             element={
-              <ProtectedRoute allowedRoles={['admin']} allowProcurement={true}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']} requireHROrAdmin={true}>
                 <AttendanceReports />
               </ProtectedRoute>
             }
           />
 
-          {/* Attendance Administration - Admin Only */}
+          {/* Attendance Administration - Admin and HR */}
           <Route
             path="dashboard/attendance-admin"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']} requireHROrAdmin={true}>
                 <AttendanceAdmin />
               </ProtectedRoute>
             }

@@ -22,8 +22,8 @@ class BranchController extends Controller
     {
         $user = $request->user();
 
-        // Admin, attendance admin, or procurement department users can view branches
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isProcurement()) {
+        // Admin, attendance admin, or HR department users can view branches
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

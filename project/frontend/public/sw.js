@@ -1,7 +1,7 @@
 // Service Worker for PWA - Push Notifications & Offline Support
-const CACHE_NAME = 'task-management-v12';
-const STATIC_CACHE = 'static-v12';
-const DYNAMIC_CACHE = 'dynamic-v12';
+const CACHE_NAME = 'task-management-v13';
+const STATIC_CACHE = 'static-v13';
+const DYNAMIC_CACHE = 'dynamic-v13';
 
 // Assets to cache on install
 const STATIC_ASSETS = [

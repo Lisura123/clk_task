@@ -37,8 +37,19 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
         
-        // Check if user is in Finance department
-        $isFinanceDept = $user->department_name && strtolower($user->department_name) === 'finance';
+        // Check if user's department has attendance settings configured
+        $deptSettings = null;
+        $hasDeptAttendance = false;
+        if ($user->department_id) {
+            $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $user->department_id)
+                ->where('is_active', true)
+                ->first();
+            $hasDeptAttendance = $deptSettings !== null;
+        }
+        
+        // Check if user is in Finance department (legacy support)
+        $userDeptName = $user->department_name ?? $user->departmentRelation?->name ?? '';
+        $isFinanceDept = $userDeptName && strtolower($userDeptName) === 'finance';
         
         // Check if user is admin
         $isAdmin = $user->isAdmin();
@@ -46,14 +57,14 @@ class GpsAttendanceController extends Controller
         // Check if user is assigned to any GPS-required showroom
         $isAssignedToRequiredShowroom = $user->isGpsAttendanceRequired();
         
-        // User has access if they are: Finance dept, assigned to required showroom, or admin
-        $hasAccess = $isFinanceDept || $isAssignedToRequiredShowroom || $isAdmin;
+        // User has access if they are: have dept attendance, assigned to required showroom, or admin
+        $hasAccess = $hasDeptAttendance || $isFinanceDept || $isAssignedToRequiredShowroom || $isAdmin;
         
         if (!$hasAccess) {
             return response()->json([
                 'has_access' => false,
                 'role' => 'none',
-                'reason' => 'GPS Attendance is only available for staff at specific showrooms (Majestic City, Kandy, Jaffna, Batticaloa, Tissamaharama) and Finance Department.',
+                'reason' => 'GPS Attendance is only available for staff at specific showrooms (Majestic City, Kandy, Jaffna, Batticaloa, Tissamaharama) or departments configured for attendance.',
                 'permissions' => [
                     'can_manage_branches' => false,
                     'can_view_all_reports' => false,
@@ -71,10 +82,11 @@ class GpsAttendanceController extends Controller
         $isFinanceRole = $attendanceRole && $role === AttendanceRole::ROLE_FINANCE;
         $isBranchEmployee = $attendanceRole && $role === AttendanceRole::ROLE_BRANCH_EMPLOYEE;
         $isProcurement = $user->isProcurement(); // Check if user is in Procurement department
+        $isHRDept = $user->isHR(); // Check if user is in HR department
 
         // Get assigned branches for users who need GPS attendance
         $assignedBranches = [];
-        if ($isAssignedToRequiredShowroom || $isFinanceDept) {
+        if ($isAssignedToRequiredShowroom || $hasDeptAttendance || $isFinanceDept) {
             $assignedBranches = $user->activeBranches()
                 ->select('branches.id', 'branches.name', 'branches.code', 'branches.city', 'branches.latitude', 'branches.longitude', 'branches.allowed_radius_meters')
                 ->get()
@@ -94,8 +106,8 @@ class GpsAttendanceController extends Controller
                 ->toArray();
         }
 
-        // Users can mark attendance if they are assigned to required showrooms or Finance dept (admins are exempt)
-        $canMarkAttendance = !$isAdmin && ($isAssignedToRequiredShowroom || $isFinanceDept);
+        // Users can mark attendance if they are assigned to required showrooms or have dept attendance (admins are exempt)
+        $canMarkAttendance = !$isAdmin && ($isAssignedToRequiredShowroom || $hasDeptAttendance || $isFinanceDept);
 
         // Get primary branch (first one marked as primary, or first branch if none marked)
         $primaryBranch = null;
@@ -105,45 +117,40 @@ class GpsAttendanceController extends Controller
             }) ?? $assignedBranches[0] ?? null;
         }
 
-        // For Finance department users without branch assignment, get department attendance settings
+        // For users with department attendance settings but no branch assignment
         $departmentAttendance = null;
-        if ($isFinanceDept && !$primaryBranch) {
-            $department = \App\Models\Department::where('name', 'Finance')->first();
-            if ($department) {
-                $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $department->id)
-                    ->where('is_active', true)
-                    ->first();
-                if ($deptSettings) {
-                    $departmentAttendance = [
-                        'department_id' => $department->id,
-                        'department_name' => $department->name,
-                        'location_name' => $deptSettings->location_name,
-                        'address' => $deptSettings->address,
-                        'city' => $deptSettings->city,
-                        'latitude' => $deptSettings->latitude ? (float) $deptSettings->latitude : null,
-                        'longitude' => $deptSettings->longitude ? (float) $deptSettings->longitude : null,
-                        'allowed_radius_meters' => $deptSettings->allowed_radius_meters,
-                        'gps_required' => $deptSettings->gps_required,
-                        'work_start_time' => $deptSettings->work_start_time,
-                        'work_end_time' => $deptSettings->work_end_time,
-                        'late_grace_minutes' => $deptSettings->late_grace_minutes,
-                        'has_location' => $deptSettings->hasLocationConfigured(),
-                    ];
-                    // Create a virtual branch for Finance department attendance
-                    $primaryBranch = [
-                        'id' => null, // No physical branch
-                        'name' => $deptSettings->location_name ?: 'Finance Department',
-                        'code' => 'FINANCE',
-                        'city' => $deptSettings->city ?: 'Head Office',
-                        'latitude' => $deptSettings->latitude ? (float) $deptSettings->latitude : null,
-                        'longitude' => $deptSettings->longitude ? (float) $deptSettings->longitude : null,
-                        'allowed_radius_meters' => $deptSettings->allowed_radius_meters,
-                        'is_primary' => true,
-                        'is_department_based' => true,
-                        'department_id' => $department->id,
-                        'gps_required' => $deptSettings->gps_required,
-                    ];
-                }
+        if ($hasDeptAttendance && !$primaryBranch) {
+            $department = $user->departmentRelation;
+            if ($department && $deptSettings) {
+                $departmentAttendance = [
+                    'department_id' => $department->id,
+                    'department_name' => $department->name,
+                    'location_name' => $deptSettings->location_name,
+                    'address' => $deptSettings->address,
+                    'city' => $deptSettings->city,
+                    'latitude' => $deptSettings->latitude ? (float) $deptSettings->latitude : null,
+                    'longitude' => $deptSettings->longitude ? (float) $deptSettings->longitude : null,
+                    'allowed_radius_meters' => $deptSettings->allowed_radius_meters,
+                    'gps_required' => $deptSettings->gps_required,
+                    'work_start_time' => $deptSettings->work_start_time,
+                    'work_end_time' => $deptSettings->work_end_time,
+                    'late_grace_minutes' => $deptSettings->late_grace_minutes,
+                    'has_location' => $deptSettings->hasLocationConfigured(),
+                ];
+                // Create a virtual branch for department attendance
+                $primaryBranch = [
+                    'id' => null, // No physical branch
+                    'name' => $deptSettings->location_name ?: $department->name . ' Department',
+                    'code' => strtoupper(substr($department->name, 0, 6)),
+                    'city' => $deptSettings->city ?: 'Head Office',
+                    'latitude' => $deptSettings->latitude ? (float) $deptSettings->latitude : null,
+                    'longitude' => $deptSettings->longitude ? (float) $deptSettings->longitude : null,
+                    'allowed_radius_meters' => $deptSettings->allowed_radius_meters,
+                    'is_primary' => true,
+                    'is_department_based' => true,
+                    'department_id' => $department->id,
+                    'gps_required' => $deptSettings->gps_required,
+                ];
             }
         }
 
@@ -176,15 +183,18 @@ class GpsAttendanceController extends Controller
             'can_mark_attendance' => $canMarkAttendance,
             'is_admin_exempt' => $isAdmin, // Admin is exempt from GPS attendance
             'is_finance_department' => $isFinanceDept,
+            'is_hr_department' => $isHRDept,
             'gps_attendance_required' => $isGpsRequired,
             'required_reason' => $isGpsRequired ? ($isFinanceDept ? 'finance_department' : 'required_showroom') : null,
             'required_showrooms' => $requiredShowrooms,
             'permissions' => [
-                'can_manage_branches' => $isAdmin || $isAdminRole,
-                'can_view_all_reports' => $isAdmin || $isAdminRole || $isFinanceRole || $isProcurement,
+                'can_manage_branches' => $isAdmin || $isAdminRole || $isHRDept,
+                'can_view_all_reports' => $isAdmin || $isAdminRole || $isFinanceRole || $isHRDept,
                 'can_mark_attendance' => $canMarkAttendance,
-                'can_approve_corrections' => $isAdmin || $isAdminRole,
-                'can_export_data' => $isAdmin || $isAdminRole || $isFinanceRole || $isProcurement,
+                'can_approve_corrections' => $isAdmin || $isAdminRole || $isHRDept,
+                'can_export_data' => $isAdmin || $isAdminRole || $isFinanceRole || $isHRDept,
+                'can_manage_departments' => $isAdmin || $isAdminRole || $isHRDept,
+                'can_view_audit_logs' => $isAdmin || $isAdminRole || $isHRDept,
             ],
             'assigned_branches' => $assignedBranches,
             'primary_branch' => $primaryBranch,
@@ -198,26 +208,51 @@ class GpsAttendanceController extends Controller
      */
     public function checkIn(Request $request): JsonResponse
     {
-        $request->validate([
-            'latitude' => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
+        $user = $request->user();
+        
+        // First, check if user's department requires GPS
+        $deptSettings = null;
+        if ($user->department_id) {
+            $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $user->department_id)
+                ->where('is_active', true)
+                ->first();
+        }
+        
+        // Determine if GPS is required for this user
+        $gpsRequired = true; // Default to required
+        if ($deptSettings && $deptSettings->gps_required === false) {
+            $gpsRequired = false;
+        }
+        
+        // Validate request - GPS coordinates only required if GPS is required
+        $rules = [
             'device_info' => 'nullable|array',
             'gps_accuracy' => 'nullable|numeric',
             'is_department_based' => 'nullable|boolean',
             'department_id' => 'nullable|integer',
-        ]);
-
-        $user = $request->user();
+        ];
+        
+        if ($gpsRequired) {
+            $rules['latitude'] = 'required|numeric|between:-90,90';
+            $rules['longitude'] = 'required|numeric|between:-180,180';
+        } else {
+            $rules['latitude'] = 'nullable|numeric|between:-90,90';
+            $rules['longitude'] = 'nullable|numeric|between:-180,180';
+        }
+        
+        $request->validate($rules);
         
         // Check if this is a department-based check-in (e.g., Finance department)
         $isDepartmentBased = $request->is_department_based ?? false;
-        $isFinanceDept = $user->department_name && strtolower($user->department_name) === 'finance';
+        $userDeptName = $user->department_name ?? $user->departmentRelation?->name ?? '';
+        $isFinanceDept = $userDeptName && strtolower($userDeptName) === 'finance';
 
         // Verify user has branch_employee OR admin_procurement role with branch assignment
-        // OR is a Finance department employee (department-based attendance)
+        // OR has a department configured for attendance
+        $hasDeptAttendance = $deptSettings !== null;
         $canMarkAttendance = $user->isAttendanceBranchEmployee() || 
                              ($user->isAttendanceAdmin() && $user->activeBranches()->count() > 0) ||
-                             $isFinanceDept;
+                             $hasDeptAttendance;
         
         if (!$canMarkAttendance) {
             $message = $user->isAttendanceAdmin() 
@@ -240,26 +275,20 @@ class GpsAttendanceController extends Controller
                 'error_code' => 'ALREADY_CHECKED_IN',
                 'message' => 'You have already checked in today.',
                 'details' => [
-                    'check_in_time' => $existingAttendance->in_time?->format('H:i'),
+                    'check_in_time' => $existingAttendance->in_time ? Carbon::parse($existingAttendance->in_time)->format('H:i') : null,
                     'branch_name' => $existingAttendance->branch?->name ?? 'Department Attendance',
                 ],
             ], 400);
         }
 
-        $latitude = (float) $request->latitude;
-        $longitude = (float) $request->longitude;
+        $latitude = $request->latitude ? (float) $request->latitude : null;
+        $longitude = $request->longitude ? (float) $request->longitude : null;
         $gpsAccuracy = $request->gps_accuracy;
         $deviceInfo = $request->device_info ?? [];
 
-        // Handle department-based check-in (Finance department without branch)
-        if ($isFinanceDept && $user->activeBranches()->count() === 0) {
-            $department = \App\Models\Department::where('name', 'Finance')->first();
-            $deptSettings = null;
-            if ($department) {
-                $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $department->id)
-                    ->where('is_active', true)
-                    ->first();
-            }
+        // Handle department-based check-in (any department with attendance settings)
+        if ($hasDeptAttendance && $user->activeBranches()->count() === 0) {
+            $department = $user->departmentRelation;
             
             if (!$deptSettings) {
                 return response()->json([
@@ -270,56 +299,68 @@ class GpsAttendanceController extends Controller
             }
 
             // Check if GPS validation is required for this department
-            if ($deptSettings->gps_required && $deptSettings->hasLocationConfigured()) {
-                // Validate GPS location against department location
-                $distance = $this->gpsService->calculateDistance(
-                    $latitude,
-                    $longitude,
-                    (float) $deptSettings->latitude,
-                    (float) $deptSettings->longitude
-                );
-
-                $allowedRadius = $deptSettings->allowed_radius_meters ?? 100;
-                
-                if ($distance > $allowedRadius) {
-                    // Log the failed attempt
-                    $this->gpsService->logAudit(
-                        AttendanceAuditLog::ACTION_CHECK_IN_FAILED,
-                        $user,
-                        null,
-                        null,
-                        [
-                            'latitude' => $latitude,
-                            'longitude' => $longitude,
-                            'department_id' => $department->id,
-                            'department_location' => $deptSettings->location_name,
-                            'distance_meters' => $distance,
-                            'allowed_radius' => $allowedRadius,
-                            'failure_reason' => 'outside_department_radius',
-                            'device_info' => $deviceInfo,
-                            'ip_address' => $request->ip(),
-                        ]
-                    );
-
+            if ($deptSettings->gps_required) {
+                // GPS is required - validate location
+                if (!$latitude || !$longitude) {
                     return response()->json([
                         'success' => false,
-                        'error_code' => 'OUTSIDE_DEPARTMENT_LOCATION',
-                        'message' => "You are {$distance}m away from {$deptSettings->location_name}. You must be within {$allowedRadius}m to check in.",
-                        'details' => [
-                            'distance_meters' => $distance,
-                            'allowed_radius_meters' => $allowedRadius,
-                            'department_location' => $deptSettings->location_name,
-                            'department_address' => $deptSettings->address,
-                        ],
+                        'error_code' => 'GPS_REQUIRED',
+                        'message' => 'GPS location is required for your department. Please enable location services.',
                     ], 400);
                 }
-            } elseif ($deptSettings->gps_required && !$deptSettings->hasLocationConfigured()) {
-                return response()->json([
-                    'success' => false,
-                    'error_code' => 'DEPARTMENT_LOCATION_NOT_SET',
-                    'message' => 'Department location is not configured. Please contact admin to set up the department location.',
-                ], 400);
+                
+                if ($deptSettings->hasLocationConfigured()) {
+                    // Validate GPS location against department location
+                    $distance = $this->gpsService->calculateDistance(
+                        $latitude,
+                        $longitude,
+                        (float) $deptSettings->latitude,
+                        (float) $deptSettings->longitude
+                    );
+
+                    $allowedRadius = $deptSettings->allowed_radius_meters ?? 100;
+                    
+                    if ($distance > $allowedRadius) {
+                        // Log the failed attempt
+                        $this->gpsService->logAudit(
+                            AttendanceAuditLog::ACTION_CHECK_IN_FAILED,
+                            $user,
+                            null,
+                            null,
+                            [
+                                'latitude' => $latitude,
+                                'longitude' => $longitude,
+                                'department_id' => $department->id,
+                                'department_location' => $deptSettings->location_name,
+                                'distance_meters' => $distance,
+                                'allowed_radius' => $allowedRadius,
+                                'failure_reason' => 'outside_department_radius',
+                                'device_info' => $deviceInfo,
+                                'ip_address' => $request->ip(),
+                            ]
+                        );
+
+                        return response()->json([
+                            'success' => false,
+                            'error_code' => 'OUTSIDE_DEPARTMENT_LOCATION',
+                            'message' => "You are {$distance}m away from {$deptSettings->location_name}. You must be within {$allowedRadius}m to check in.",
+                            'details' => [
+                                'distance_meters' => $distance,
+                                'allowed_radius_meters' => $allowedRadius,
+                                'department_location' => $deptSettings->location_name,
+                                'department_address' => $deptSettings->address,
+                            ],
+                        ], 400);
+                    }
+                } else {
+                    return response()->json([
+                        'success' => false,
+                        'error_code' => 'DEPARTMENT_LOCATION_NOT_SET',
+                        'message' => 'Department location is not configured. Please contact admin to set up the department location.',
+                    ], 400);
+                }
             }
+            // If gps_required is false, skip all GPS validation - just create the attendance record
 
             // Create department-based attendance record with GPS validation
             $attendance = $this->gpsService->createDepartmentCheckIn(
@@ -579,18 +620,43 @@ class GpsAttendanceController extends Controller
      */
     public function checkOut(Request $request): JsonResponse
     {
-        $request->validate([
-            'latitude' => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
+        $user = $request->user();
+        
+        // Check if user's department requires GPS
+        $deptSettings = null;
+        if ($user->department_id) {
+            $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $user->department_id)
+                ->where('is_active', true)
+                ->first();
+        }
+        
+        // Determine if GPS is required
+        $gpsRequired = true;
+        if ($deptSettings && $deptSettings->gps_required === false) {
+            $gpsRequired = false;
+        }
+        
+        // Validate request - GPS coordinates only required if GPS is required
+        $rules = [
             'device_info' => 'nullable|array',
             'gps_accuracy' => 'nullable|numeric',
-        ]);
+        ];
+        
+        if ($gpsRequired) {
+            $rules['latitude'] = 'required|numeric|between:-90,90';
+            $rules['longitude'] = 'required|numeric|between:-180,180';
+        } else {
+            $rules['latitude'] = 'nullable|numeric|between:-90,90';
+            $rules['longitude'] = 'nullable|numeric|between:-180,180';
+        }
+        
+        $request->validate($rules);
 
-        $user = $request->user();
-
-        // Verify user has branch_employee OR admin_procurement role with branch assignment
+        // Verify user has branch_employee OR admin_procurement role with branch assignment OR dept attendance
+        $hasDeptAttendance = $deptSettings !== null;
         $canMarkAttendance = $user->isAttendanceBranchEmployee() || 
-                             ($user->isAttendanceAdmin() && $user->activeBranches()->count() > 0);
+                             ($user->isAttendanceAdmin() && $user->activeBranches()->count() > 0) ||
+                             $hasDeptAttendance;
         
         if (!$canMarkAttendance) {
             $message = $user->isAttendanceAdmin() 
@@ -621,46 +687,48 @@ class GpsAttendanceController extends Controller
                 'error_code' => 'ALREADY_CHECKED_OUT',
                 'message' => 'You have already checked out today.',
                 'details' => [
-                    'check_out_time' => $attendance->out_time?->format('H:i'),
+                    'check_out_time' => $attendance->out_time ? Carbon::parse($attendance->out_time)->format('H:i') : null,
                 ],
             ], 400);
         }
 
-        $latitude = (float) $request->latitude;
-        $longitude = (float) $request->longitude;
+        $latitude = $request->latitude ? (float) $request->latitude : null;
+        $longitude = $request->longitude ? (float) $request->longitude : null;
         $gpsAccuracy = $request->gps_accuracy;
         $deviceInfo = $request->device_info ?? [];
 
         $branch = $attendance->branch;
 
-        // Validate GPS location
-        $validationResult = $this->gpsService->validateLocation($latitude, $longitude, $branch, $gpsAccuracy);
+        // Only validate GPS location if GPS is required and we have a branch
+        if ($gpsRequired && $branch) {
+            // Validate GPS location
+            $validationResult = $this->gpsService->validateLocation($latitude, $longitude, $branch, $gpsAccuracy);
 
-        if (!$validationResult['is_valid']) {
-            $this->gpsService->logValidationFailure(
-                $user,
-                $branch,
-                $validationResult,
-                $deviceInfo,
-                $request->ip(),
-                $gpsAccuracy
-            );
+            if (!$validationResult['is_valid']) {
+                $this->gpsService->logValidationFailure(
+                    $user,
+                    $branch,
+                    $validationResult,
+                    $deviceInfo,
+                    $request->ip(),
+                    $gpsAccuracy
+                );
 
-            $this->gpsService->logAudit(
-                AttendanceAuditLog::ACTION_CHECK_OUT_FAILED,
-                $user,
-                $branch,
-                $attendance,
-                [
-                    'latitude' => $latitude,
-                    'longitude' => $longitude,
-                    'distance_meters' => $validationResult['distance_meters'],
-                    'failure_reason' => $validationResult['failure_reason'],
-                    'device_info' => $deviceInfo,
-                    'ip_address' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                ]
-            );
+                $this->gpsService->logAudit(
+                    AttendanceAuditLog::ACTION_CHECK_OUT_FAILED,
+                    $user,
+                    $branch,
+                    $attendance,
+                    [
+                        'latitude' => $latitude,
+                        'longitude' => $longitude,
+                        'distance_meters' => $validationResult['distance_meters'],
+                        'failure_reason' => $validationResult['failure_reason'],
+                        'device_info' => $deviceInfo,
+                        'ip_address' => $request->ip(),
+                        'user_agent' => $request->userAgent(),
+                    ]
+                );
 
             $message = match ($validationResult['failure_reason']) {
                 'outside_radius' => "You are {$validationResult['distance_meters']} meters from {$branch->name}. Please move within {$validationResult['allowed_radius_meters']} meters to check out.",
@@ -677,10 +745,31 @@ class GpsAttendanceController extends Controller
                     'allowed_radius' => $validationResult['allowed_radius_meters'],
                 ],
             ], 400);
+            }
+        }
+
+        // Set default validation result if GPS not required
+        if (!isset($validationResult)) {
+            $validationResult = [
+                'is_valid' => true,
+                'distance_meters' => 0,
+                'allowed_radius_meters' => 0,
+            ];
+        }
+
+        // Get department settings if this is department-based attendance
+        $deptSettings = null;
+        if ($attendance->is_department_based && $attendance->department_id) {
+            $deptSettings = \App\Models\DepartmentAttendanceSetting::where('department_id', $attendance->department_id)
+                ->where('is_active', true)
+                ->first();
         }
 
         // Validate check-out time
-        $timeValidation = $this->gpsService->validateCheckOutTime($branch, $attendance);
+        $timeValidation = $this->gpsService->validateCheckOutTime($branch, $attendance, null, $deptSettings);
+
+        // Determine location name for notes
+        $locationName = $branch ? $branch->name : ($deptSettings?->location_name ?? 'Department Attendance');
 
         DB::beginTransaction();
         try {
@@ -689,7 +778,7 @@ class GpsAttendanceController extends Controller
                 'check_out_latitude' => $latitude,
                 'check_out_longitude' => $longitude,
                 'check_out_device_info' => $deviceInfo,
-                'check_out_distance_meters' => $validationResult['distance_meters'],
+                'check_out_distance_meters' => $validationResult['distance_meters'] ?? 0,
                 'working_hours' => $timeValidation['working_hours'],
                 'is_early_leave' => $timeValidation['is_early_leave'],
                 'early_by_minutes' => $timeValidation['early_minutes'],
@@ -697,7 +786,7 @@ class GpsAttendanceController extends Controller
                 'check_out_timestamp' => now(),
                 'check_out_gps_accuracy' => $gpsAccuracy,
                 'location_verification_notes' => $attendance->location_verification_notes . 
-                    " | Checkout verified at {$branch->name} ({$validationResult['distance_meters']}m from center)",
+                    " | Checkout verified at {$locationName} ({$validationResult['distance_meters']}m from center)",
             ]);
 
             // Update status if early leave
@@ -714,10 +803,11 @@ class GpsAttendanceController extends Controller
                 [
                     'latitude' => $latitude,
                     'longitude' => $longitude,
-                    'distance_meters' => $validationResult['distance_meters'],
+                    'distance_meters' => $validationResult['distance_meters'] ?? 0,
                     'device_info' => $deviceInfo,
                     'ip_address' => $request->ip(),
                     'user_agent' => $request->userAgent(),
+                    'is_department_based' => $attendance->is_department_based,
                     'validation_details' => [
                         'time_validation' => $timeValidation,
                         'location_validation' => $validationResult,
@@ -731,16 +821,16 @@ class GpsAttendanceController extends Controller
                 'success' => true,
                 'message' => 'Check-out successful!',
                 'attendance_id' => $attendance->id,
-                'check_out_time' => $attendance->out_time->format('H:i'),
+                'check_out_time' => Carbon::parse($attendance->out_time)->format('H:i'),
                 'total_working_hours' => $timeValidation['working_hours'],
                 'is_early_leave' => $timeValidation['is_early_leave'],
                 'early_by_minutes' => $timeValidation['early_minutes'],
                 'status' => $attendance->attendance_status,
                 // Enhanced tracking info
                 'location_tracking' => [
-                    'verified_at' => $branch->name,
-                    'distance_from_center' => $validationResult['distance_meters'],
-                    'allowed_radius' => $branch->allowed_radius_meters,
+                    'verified_at' => $locationName,
+                    'distance_from_center' => $validationResult['distance_meters'] ?? 0,
+                    'allowed_radius' => $branch?->allowed_radius_meters ?? ($deptSettings?->allowed_radius_meters ?? 100),
                     'gps_accuracy' => $gpsAccuracy,
                     'coordinates' => [
                         'latitude' => $latitude,
@@ -813,10 +903,10 @@ class GpsAttendanceController extends Controller
         return response()->json([
             'date' => now()->toDateString(),
             'has_checked_in' => $attendance?->hasCheckedIn() ?? false,
-            'check_in_time' => $attendance?->in_time?->format('H:i'),
+            'check_in_time' => $attendance?->in_time ? Carbon::parse($attendance->in_time)->format('H:i') : null,
             'check_in_branch' => $attendance?->branch?->name,
             'has_checked_out' => $attendance?->hasCheckedOut() ?? false,
-            'check_out_time' => $attendance?->out_time?->format('H:i'),
+            'check_out_time' => $attendance?->out_time ? Carbon::parse($attendance->out_time)->format('H:i') : null,
             'status' => $attendance?->attendance_status,
             'working_hours' => $attendance?->working_hours,
             'is_late' => $attendance?->is_late ?? false,
@@ -830,8 +920,8 @@ class GpsAttendanceController extends Controller
                 'id' => $attendance->id,
                 'has_checked_in' => $attendance->hasCheckedIn(),
                 'has_checked_out' => $attendance->hasCheckedOut(),
-                'check_in_time' => $attendance->in_time?->format('H:i'),
-                'check_out_time' => $attendance->out_time?->format('H:i'),
+                'check_in_time' => $attendance->in_time ? Carbon::parse($attendance->in_time)->format('H:i') : null,
+                'check_out_time' => $attendance->out_time ? Carbon::parse($attendance->out_time)->format('H:i') : null,
                 'attendance_status' => $attendance->attendance_status,
                 'location_tracking' => [
                     'verified_branch' => $attendance->verified_branch_name,
@@ -1140,10 +1230,10 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        // Only admin/procurement can use this endpoint
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        // Admin, HR, and attendance admin can use this endpoint
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json([
-                'error' => 'Only admin/procurement users can use this feature.',
+                'error' => 'Only admin/HR users can use this feature.',
             ], 403);
         }
 
@@ -1238,10 +1328,10 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        // Only admin/procurement can use this endpoint
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        // Admin, HR, and attendance admin can use this endpoint
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json([
-                'error' => 'Only admin/procurement users can use this feature.',
+                'error' => 'Only admin/HR users can use this feature.',
             ], 403);
         }
 
@@ -1284,10 +1374,10 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        // Only admin can access this
-        if (!$user->isAdmin() && !$user->isAttendanceAdmin()) {
+        // Allow admin, HR, and Finance to access live attendance
+        if (!$user->isAdmin() && !$user->isAttendanceAdmin() && !$user->isHR() && !$user->isAttendanceFinance()) {
             return response()->json([
-                'error' => 'Unauthorized. Only administrators can access live attendance.',
+                'error' => 'Unauthorized. Only administrators, HR, and Finance can access live attendance.',
             ], 403);
         }
 
@@ -1295,7 +1385,7 @@ class GpsAttendanceController extends Controller
         $branchId = $request->get('branch_id');
 
         // Get today's attendance records
-        $query = Attendance::with(['user:id,name,email,employee_id', 'branch:id,name,code,city'])
+        $query = Attendance::with(['user:id,name,email,emp_code', 'branch:id,name,code,city'])
             ->whereDate('date', $today);
 
         if ($branchId) {
@@ -1311,7 +1401,7 @@ class GpsAttendanceController extends Controller
                 'user' => [
                     'id' => $record->user->id ?? null,
                     'name' => $record->user->name ?? 'Unknown',
-                    'employee_id' => $record->user->employee_id ?? null,
+                    'employee_id' => $record->user->emp_code ?? null,
                 ],
                 'branch' => [
                     'id' => $record->branch->id ?? null,
@@ -1344,10 +1434,10 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        // Only admin can access this
-        if (!$user->isAdmin() && !$user->isAttendanceAdmin()) {
+        // Admin and HR can access audit logs
+        if (!$user->isAdmin() && !$user->isAttendanceAdmin() && !$user->isHR()) {
             return response()->json([
-                'error' => 'Unauthorized. Only administrators can access audit logs.',
+                'error' => 'Unauthorized. Only administrators or HR can access audit logs.',
             ], 403);
         }
 
@@ -1433,7 +1523,8 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        // Allow admin, attendance admin, HODs, HR, and Finance to view departments
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHod() && !$user->isHR() && !$user->isAttendanceFinance()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -1449,6 +1540,13 @@ class GpsAttendanceController extends Controller
                     'work_start_time' => $setting->work_start_time?->format('H:i'),
                     'work_end_time' => $setting->work_end_time?->format('H:i'),
                     'late_grace_minutes' => $setting->late_grace_minutes,
+                    'location_name' => $setting->location_name,
+                    'address' => $setting->address,
+                    'city' => $setting->city,
+                    'latitude' => $setting->latitude,
+                    'longitude' => $setting->longitude,
+                    'allowed_radius_meters' => $setting->allowed_radius_meters,
+                    'gps_required' => $setting->gps_required,
                     'employee_count' => User::where('department_id', $setting->department_id)->count(),
                     'created_by' => $setting->creator?->name,
                     'created_at' => $setting->created_at,
@@ -1468,7 +1566,7 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -1477,6 +1575,13 @@ class GpsAttendanceController extends Controller
             'work_start_time' => 'nullable|date_format:H:i',
             'work_end_time' => 'nullable|date_format:H:i',
             'late_grace_minutes' => 'nullable|integer|min:0|max:60',
+            'location_name' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
+            'city' => 'nullable|string|max:100',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+            'allowed_radius_meters' => 'nullable|integer|min:10|max:5000',
+            'gps_required' => 'nullable|boolean',
         ]);
 
         $setting = DepartmentAttendanceSetting::create([
@@ -1484,6 +1589,13 @@ class GpsAttendanceController extends Controller
             'work_start_time' => $validated['work_start_time'] ?? '09:00',
             'work_end_time' => $validated['work_end_time'] ?? '18:00',
             'late_grace_minutes' => $validated['late_grace_minutes'] ?? 15,
+            'location_name' => $validated['location_name'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'latitude' => $validated['latitude'] ?? null,
+            'longitude' => $validated['longitude'] ?? null,
+            'allowed_radius_meters' => $validated['allowed_radius_meters'] ?? 100,
+            'gps_required' => $validated['gps_required'] ?? true,
             'created_by' => $user->id,
         ]);
 
@@ -1495,9 +1607,17 @@ class GpsAttendanceController extends Controller
                 'id' => $setting->id,
                 'department_id' => $setting->department_id,
                 'department' => $setting->department,
+                'name' => $setting->department?->name,
                 'work_start_time' => $setting->work_start_time?->format('H:i'),
                 'work_end_time' => $setting->work_end_time?->format('H:i'),
                 'late_grace_minutes' => $setting->late_grace_minutes,
+                'location_name' => $setting->location_name,
+                'address' => $setting->address,
+                'city' => $setting->city,
+                'latitude' => $setting->latitude,
+                'longitude' => $setting->longitude,
+                'allowed_radius_meters' => $setting->allowed_radius_meters,
+                'gps_required' => $setting->gps_required,
             ],
         ], 201);
     }
@@ -1509,7 +1629,7 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
@@ -1519,19 +1639,19 @@ class GpsAttendanceController extends Controller
             'work_start_time' => 'nullable|date_format:H:i',
             'work_end_time' => 'nullable|date_format:H:i',
             'late_grace_minutes' => 'nullable|integer|min:0|max:60',
+            'location_name' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:500',
+            'city' => 'nullable|string|max:100',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
+            'allowed_radius_meters' => 'nullable|integer|min:10|max:5000',
+            'gps_required' => 'nullable|boolean',
         ]);
 
-        if (isset($validated['work_start_time'])) {
-            $setting->work_start_time = $validated['work_start_time'];
-        }
-        if (isset($validated['work_end_time'])) {
-            $setting->work_end_time = $validated['work_end_time'];
-        }
-        if (isset($validated['late_grace_minutes'])) {
-            $setting->late_grace_minutes = $validated['late_grace_minutes'];
-        }
-
+        // Update all provided fields
+        $setting->fill($validated);
         $setting->save();
+        
         $setting->load('department:id,name');
 
         return response()->json([
@@ -1540,9 +1660,17 @@ class GpsAttendanceController extends Controller
                 'id' => $setting->id,
                 'department_id' => $setting->department_id,
                 'department' => $setting->department,
+                'name' => $setting->department?->name,
                 'work_start_time' => $setting->work_start_time?->format('H:i'),
                 'work_end_time' => $setting->work_end_time?->format('H:i'),
                 'late_grace_minutes' => $setting->late_grace_minutes,
+                'location_name' => $setting->location_name,
+                'address' => $setting->address,
+                'city' => $setting->city,
+                'latitude' => $setting->latitude,
+                'longitude' => $setting->longitude,
+                'allowed_radius_meters' => $setting->allowed_radius_meters,
+                'gps_required' => $setting->gps_required,
             ],
         ]);
     }
@@ -1554,7 +1682,7 @@ class GpsAttendanceController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isAttendanceAdmin() && !$user->isAdmin()) {
+        if (!$user->isAttendanceAdmin() && !$user->isAdmin() && !$user->isHR()) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

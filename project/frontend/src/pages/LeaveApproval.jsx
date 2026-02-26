@@ -126,7 +126,7 @@ export default function LeaveApproval() {
   };
 
   const getStatusLabel = (leave) => {
-    // Use status_label from API if available (handles Procurement employees correctly)
+    // Use status_label from API if available (handles HR and other employees correctly)
     if (typeof leave === 'object' && leave.status_label) {
       return leave.status_label;
     }

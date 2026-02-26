@@ -150,6 +150,193 @@ class LeaveController extends Controller
     }
 
     /**
+     * Get all employees' leave balances and no-pay details (Admin/HR only)
+     * Supports monthly and yearly filtering
+     */
+    public function getAllBalances(Request $request)
+    {
+        $user = $request->user();
+        
+        // Only Admin and HR can view all balances
+        if (!$user->isAdmin() && !$user->isHR()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $year = $request->get('year', date('Y'));
+        $month = $request->get('month'); // Optional month filter (1-12)
+        $departmentId = $request->get('department_id');
+        $search = $request->get('search');
+        
+        // Custom date range parameters
+        $customStartDate = $request->get('start_date');
+        $customEndDate = $request->get('end_date');
+
+        // Build query for users with their leave balances
+        $query = User::with(['departmentRelation', 'leaveBalances' => function ($q) use ($year, $customStartDate) {
+            // Use year from custom start date if provided
+            $balanceYear = $customStartDate ? Carbon::parse($customStartDate)->year : $year;
+            $q->where('year', $balanceYear)->with('leaveType');
+        }])
+        ->whereIn('status', ['active', 'approved'])
+        ->whereIn('role', ['employee', 'senior_employee', 'hod']);
+
+        // Filter by department
+        if ($departmentId) {
+            $query->where('department_id', $departmentId);
+        }
+
+        // Search by name or emp_code
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('emp_code', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+
+        $users = $query->orderBy('name')->paginate($request->get('per_page', 20));
+
+        // Get unpaid leave requests (no-pay) for each user
+        $userIds = $users->pluck('id')->toArray();
+        
+        // Build date range - use custom dates if provided, otherwise use month/year
+        if ($customStartDate && $customEndDate) {
+            $startDate = Carbon::parse($customStartDate)->startOfDay();
+            $endDate = Carbon::parse($customEndDate)->endOfDay();
+        } elseif ($month) {
+            $startDate = Carbon::create($year, $month, 1)->startOfMonth();
+            $endDate = Carbon::create($year, $month, 1)->endOfMonth();
+        } else {
+            $startDate = Carbon::create($year, 1, 1)->startOfYear();
+            $endDate = Carbon::create($year, 12, 31)->endOfYear();
+        }
+
+        // Get approved unpaid leaves (no-pay)
+        $unpaidLeaves = LeaveRequest::whereIn('user_id', $userIds)
+            ->where('status', 'approved')
+            ->whereHas('leaveType', function ($q) {
+                $q->where('is_paid', false);
+            })
+            ->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                  ->orWhereBetween('end_date', [$startDate, $endDate])
+                  ->orWhere(function ($q2) use ($startDate, $endDate) {
+                      $q2->where('start_date', '<=', $startDate)
+                         ->where('end_date', '>=', $endDate);
+                  });
+            })
+            ->with('leaveType')
+            ->get()
+            ->groupBy('user_id');
+
+        // Get all approved leaves for the period
+        $allLeaves = LeaveRequest::whereIn('user_id', $userIds)
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('start_date', [$startDate, $endDate])
+                  ->orWhereBetween('end_date', [$startDate, $endDate])
+                  ->orWhere(function ($q2) use ($startDate, $endDate) {
+                      $q2->where('start_date', '<=', $startDate)
+                         ->where('end_date', '>=', $endDate);
+                  });
+            })
+            ->with('leaveType')
+            ->get()
+            ->groupBy('user_id');
+
+        // Format the response
+        $data = $users->map(function ($u) use ($unpaidLeaves, $allLeaves, $month, $year) {
+            $userUnpaidLeaves = $unpaidLeaves->get($u->id, collect());
+            $userAllLeaves = $allLeaves->get($u->id, collect());
+            
+            // Calculate total no-pay days
+            $totalNoPay = $userUnpaidLeaves->sum('total_days');
+            
+            // Calculate total leave days taken
+            $totalLeaveDays = $userAllLeaves->sum('total_days');
+            $paidLeaveDays = $userAllLeaves->filter(function ($leave) {
+                return $leave->leaveType && $leave->leaveType->is_paid;
+            })->sum('total_days');
+
+            return [
+                'user_id' => $u->id,
+                'emp_code' => $u->emp_code,
+                'name' => $u->name,
+                'email' => $u->email,
+                'department' => $u->departmentRelation?->name ?? $u->department,
+                'department_id' => $u->department_id,
+                'role' => $u->role,
+                'profile_image' => $u->profile_picture ? asset('storage/' . $u->profile_picture) : null,
+                'leave_balances' => $u->leaveBalances->map(function ($balance) {
+                    return [
+                        'id' => $balance->id,
+                        'leave_type_id' => $balance->leave_type_id,
+                        'leave_type' => $balance->leaveType?->name,
+                        'leave_type_name' => $balance->leaveType?->name,
+                        'is_paid' => $balance->leaveType?->is_paid ?? true,
+                        'entitled_days' => (float) ($balance->allocated_days + $balance->carried_over),
+                        'allocated_days' => (float) $balance->allocated_days,
+                        'used_days' => (float) $balance->used_days,
+                        'pending_days' => (float) $balance->pending_days,
+                        'remaining_days' => (float) $balance->available_days,
+                        'available_days' => (float) $balance->available_days,
+                        'carried_over' => (float) $balance->carried_over,
+                    ];
+                }),
+                'total_no_pay_days' => (float) $totalNoPay,
+                'total_leave_days' => (float) $totalLeaveDays,
+                'paid_leave_days' => (float) $paidLeaveDays,
+                'summary' => [
+                    'total_leave_days' => (float) $totalLeaveDays,
+                    'paid_leave_days' => (float) $paidLeaveDays,
+                    'no_pay_days' => (float) $totalNoPay,
+                    'period' => $month ? date('F Y', mktime(0, 0, 0, $month, 1, $year)) : $year,
+                ],
+                'no_pay_leaves' => $userUnpaidLeaves->map(function ($leave) {
+                    return [
+                        'id' => $leave->id,
+                        'leave_type' => $leave->leaveType?->name,
+                        'start_date' => $leave->start_date->format('Y-m-d'),
+                        'end_date' => $leave->end_date->format('Y-m-d'),
+                        'total_days' => (float) $leave->total_days,
+                        'reason' => $leave->reason,
+                    ];
+                }),
+            ];
+        });
+
+        // Calculate totals for summary
+        $totalLeaveUsed = $data->sum('total_leave_days');
+        $totalNoPay = $data->sum('total_no_pay_days');
+
+        // Get departments for filter dropdown
+        $departments = \App\Models\Department::select('id', 'name')->orderBy('name')->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+            'pagination' => [
+                'current_page' => $users->currentPage(),
+                'last_page' => $users->lastPage(),
+                'per_page' => $users->perPage(),
+                'total' => $users->total(),
+            ],
+            'filters' => [
+                'year' => (int) $year,
+                'month' => $month ? (int) $month : null,
+                'department_id' => $departmentId ? (int) $departmentId : null,
+            ],
+            'departments' => $departments,
+            'summary' => [
+                'total_employees' => $users->total(),
+                'total_leave_days_used' => (float) $totalLeaveUsed,
+                'total_no_pay_days' => (float) $totalNoPay,
+                'period' => $month ? date('F Y', mktime(0, 0, 0, $month, 1, $year)) : "Year $year",
+            ],
+        ]);
+    }
+
+    /**
      * Get leave balances for current user
      */
     public function getMyBalances(Request $request)
@@ -322,11 +509,16 @@ class LeaveController extends Controller
     }
 
     /**
-     * Get all leave requests (Admin only)
+     * Get all leave requests (Admin, HOD, or HR for approved leaves)
      */
     public function getAllLeaves(Request $request)
     {
         $user = $request->user();
+        
+        // HR can only view approved leaves
+        if ($user->isHR() && !$user->isAdmin() && !$user->isHod()) {
+            return $this->getApprovedLeavesForHR($request);
+        }
         
         if (!$user->isAdmin() && !$user->isHod()) {
             return response()->json(['message' => 'Unauthorized'], 403);
@@ -385,9 +577,136 @@ class LeaveController extends Controller
     }
 
     /**
+     * Get approved leave requests for HR department
+     * HR can view all approved and hod_approved leaves for tracking purposes
+     */
+    protected function getApprovedLeavesForHR(Request $request)
+    {
+        $query = LeaveRequest::with(['user', 'leaveType', 'department', 'approvedBy', 'hodApprovedBy', 'adminApprovedBy'])
+            ->whereIn('status', ['approved', 'hod_approved']);
+
+        // Filters
+        if ($request->has('department_id')) {
+            $query->where('department_id', $request->department_id);
+        }
+
+        if ($request->has('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+
+        if ($request->has('leave_type_id')) {
+            $query->where('leave_type_id', $request->leave_type_id);
+        }
+
+        if ($request->has('year')) {
+            $query->forYear($request->year);
+        } else {
+            // Default to current year
+            $query->forYear(now()->year);
+        }
+
+        if ($request->has('start_date') && $request->has('end_date')) {
+            $query->where('start_date', '>=', $request->start_date)
+                  ->where('end_date', '<=', $request->end_date);
+        }
+
+        // Filter by status if provided (approved or hod_approved)
+        if ($request->has('status') && in_array($request->status, ['approved', 'hod_approved'])) {
+            $query->where('status', $request->status);
+        }
+
+        $leaves = $query->orderBy('created_at', 'desc')
+                       ->paginate($request->get('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'data' => $leaves->items(),
+            'pagination' => [
+                'current_page' => $leaves->currentPage(),
+                'last_page' => $leaves->lastPage(),
+                'per_page' => $leaves->perPage(),
+                'total' => $leaves->total(),
+            ],
+            'is_hr_view' => true,
+            'message' => 'Showing approved leave requests'
+        ]);
+    }
+
+    /**
+     * Get approved leave requests (HR, Admin, HOD)
+     * HR sees all approved leaves across all departments
+     * Admin/HOD can also use this endpoint
+     */
+    public function getApprovedLeaves(Request $request)
+    {
+        $user = $request->user();
+        
+        // HR, Admin, and HOD can view approved leaves
+        if (!$user->isHR() && !$user->isAdmin() && !$user->isHod()) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $query = LeaveRequest::with(['user', 'leaveType', 'department', 'approvedBy', 'hodApprovedBy', 'adminApprovedBy'])
+            ->whereIn('status', ['approved', 'hod_approved']);
+
+        // HOD can only see their department's approved leaves
+        if ($user->isHod() && !$user->isAdmin() && !$user->isHR()) {
+            $managedDepts = $user->managed_department_ids ?? [];
+            if (empty($managedDepts) && $user->department_id) {
+                $managedDepts = [$user->department_id];
+            }
+            $query->whereIn('department_id', $managedDepts);
+        }
+
+        // Filters
+        if ($request->has('department_id')) {
+            $query->where('department_id', $request->department_id);
+        }
+
+        if ($request->has('user_id')) {
+            $query->where('user_id', $request->user_id);
+        }
+
+        if ($request->has('leave_type_id')) {
+            $query->where('leave_type_id', $request->leave_type_id);
+        }
+
+        if ($request->has('year')) {
+            $query->forYear($request->year);
+        } else {
+            // Default to current year
+            $query->forYear(now()->year);
+        }
+
+        if ($request->has('start_date') && $request->has('end_date')) {
+            $query->where('start_date', '>=', $request->start_date)
+                  ->where('end_date', '<=', $request->end_date);
+        }
+
+        // Filter by specific status if provided
+        if ($request->has('status') && in_array($request->status, ['approved', 'hod_approved'])) {
+            $query->where('status', $request->status);
+        }
+
+        $leaves = $query->orderBy('created_at', 'desc')
+                       ->paginate($request->get('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'data' => $leaves->items(),
+            'pagination' => [
+                'current_page' => $leaves->currentPage(),
+                'last_page' => $leaves->lastPage(),
+                'per_page' => $leaves->perPage(),
+                'total' => $leaves->total(),
+            ]
+        ]);
+    }
+
+    /**
      * Get pending leave requests (Admin only)
-     * HOD sees: pending requests from employees in their department (except Procurement)
-     * Admin sees: hod_approved requests (needing final approval) + pending HOD requests + pending Procurement requests
+     * HOD sees: pending requests from employees in their department (except HR)
+     * Admin sees: hod_approved requests (needing final approval) + pending HOD requests + pending HR requests
      */
     public function getPendingLeaves(Request $request)
     {
@@ -399,15 +718,15 @@ class LeaveController extends Controller
 
         $query = LeaveRequest::with(['user', 'leaveType', 'department', 'hodApprovedBy', 'adminApprovedBy']);
 
-        // Get Procurement department ID
-        $procurementDeptId = \App\Models\Department::where('name', 'Procurement')->value('id');
+        // Get HR department ID
+        $hrDeptId = \App\Models\Department::where('name', 'HR')->value('id');
 
         if ($user->isAdmin()) {
             // Admin sees:
             // 1. Requests from HODs that are pending (direct admin approval)
             // 2. Requests from employees/senior employees that have been approved by HOD (hod_approved)
-            // 3. Requests from Procurement department employees (pending - they skip HOD approval)
-            $query->where(function ($q) use ($procurementDeptId) {
+            // 3. Requests from HR department employees (pending - they skip HOD approval)
+            $query->where(function ($q) use ($hrDeptId) {
                 // HOD requests pending admin approval
                 $q->where('status', 'pending')
                   ->whereHas('user', function ($uq) {
@@ -416,11 +735,11 @@ class LeaveController extends Controller
             })->orWhere(function ($q) {
                 // Employee/Senior Employee requests that HOD approved, pending admin final approval
                 $q->where('status', 'hod_approved');
-            })->orWhere(function ($q) use ($procurementDeptId) {
-                // Procurement department employees - pending requests go directly to admin
-                if ($procurementDeptId) {
+            })->orWhere(function ($q) use ($hrDeptId) {
+                // HR department employees - pending requests go directly to admin
+                if ($hrDeptId) {
                     $q->where('status', 'pending')
-                      ->where('department_id', $procurementDeptId)
+                      ->where('department_id', $hrDeptId)
                       ->whereHas('user', function ($uq) {
                           $uq->whereIn('role', ['employee', 'senior_employee']);
                       });
@@ -428,15 +747,15 @@ class LeaveController extends Controller
             });
         } else {
             // HOD sees pending requests from employees and senior employees in their department
-            // EXCEPT Procurement department (they go directly to admin)
+            // EXCEPT HR department (they go directly to admin)
             $managedDepts = $user->managed_department_ids ?? [];
             if (empty($managedDepts) && $user->department_id) {
                 $managedDepts = [$user->department_id];
             }
             
-            // Exclude Procurement department from HOD's view
-            if ($procurementDeptId) {
-                $managedDepts = array_filter($managedDepts, fn($id) => (int)$id !== (int)$procurementDeptId);
+            // Exclude HR department from HOD's view
+            if ($hrDeptId) {
+                $managedDepts = array_filter($managedDepts, fn($id) => (int)$id !== (int)$hrDeptId);
             }
             
             $query->where('status', 'pending')
@@ -625,21 +944,21 @@ class LeaveController extends Controller
 
         $leaveRequest = LeaveRequest::with('user')->findOrFail($id);
 
-        // Check if the requester is from Procurement department
-        $isProcurementEmployee = $leaveRequest->user && $leaveRequest->user->isProcurement();
+        // Check if the requester is from HR department
+        $isHREmployee = $leaveRequest->user && $leaveRequest->user->isHR();
 
         // Determine what action to take based on approver role and request status
         if ($user->isAdmin()) {
             // Admin can approve:
             // 1. HOD requests that are pending -> directly approve (HOD has no HOD above them)
-            // 2. Procurement department employee requests that are pending -> directly approve (skip HOD)
+            // 2. HR department employee requests that are pending -> directly approve (skip HOD)
             // 3. Employee/Senior Employee requests that are hod_approved -> final approve
             if ($leaveRequest->status === 'pending' && $leaveRequest->user->role === 'hod') {
                 // HOD's request - direct admin approval (HODs don't need HOD approval)
                 $leaveRequest->approveByAdmin($user->id, $request->notes);
                 $message = 'Leave request approved successfully';
-            } elseif ($leaveRequest->status === 'pending' && $isProcurementEmployee && in_array($leaveRequest->user->role, ['employee', 'senior_employee'])) {
-                // Procurement employee request - direct admin approval (skip HOD)
+            } elseif ($leaveRequest->status === 'pending' && $isHREmployee && in_array($leaveRequest->user->role, ['employee', 'senior_employee'])) {
+                // HR employee request - direct admin approval (skip HOD)
                 $leaveRequest->approveByAdmin($user->id, $request->notes);
                 $message = 'Leave request approved successfully';
             } elseif ($leaveRequest->status === 'hod_approved') {
@@ -647,7 +966,7 @@ class LeaveController extends Controller
                 $leaveRequest->approveByAdmin($user->id, $request->notes);
                 $message = 'Leave request fully approved';
             } elseif ($leaveRequest->status === 'pending' && in_array($leaveRequest->user->role, ['employee', 'senior_employee'])) {
-                // Non-Procurement Employee/Senior Employee requests MUST be approved by HOD first
+                // Non-HR Employee/Senior Employee requests MUST be approved by HOD first
                 return response()->json([
                     'message' => 'This request must be approved by the HOD first before admin approval.'
                 ], 400);
@@ -671,10 +990,10 @@ class LeaveController extends Controller
                 ], 403);
             }
 
-            // Procurement employees go directly to admin - HOD cannot approve
-            if ($isProcurementEmployee) {
+            // HR employees go directly to admin - HOD cannot approve
+            if ($isHREmployee) {
                 return response()->json([
-                    'message' => 'Procurement department leave requests are approved directly by admin.'
+                    'message' => 'HR department leave requests are approved directly by admin.'
                 ], 403);
             }
 
@@ -937,16 +1256,16 @@ class LeaveController extends Controller
         $leaveRequest->load(['user', 'leaveType', 'department']);
         $user = $leaveRequest->user;
         
-        // Get Procurement department ID (Procurement employees skip HOD, go directly to Admin)
-        $procurementDeptId = \App\Models\Department::where('name', 'Procurement')->value('id');
-        $isProcurement = $leaveRequest->department_id == $procurementDeptId;
+        // Get HR department ID (HR employees skip HOD, go directly to Admin)
+        $hrDeptId = \App\Models\Department::where('name', 'HR')->value('id');
+        $isHR = $leaveRequest->department_id == $hrDeptId;
         
         // Always get all admins for notification
         $adminUsers = \App\Models\User::where('role', 'admin')->get();
         
         // Get the relevant HOD (if applicable)
         $hodUsers = collect();
-        if ($user->role !== 'hod' && !$isProcurement) {
+        if ($user->role !== 'hod' && !$isHR) {
             // Regular employees and senior employees - get their department HOD
             $hodUsers = \App\Models\User::where('role', 'hod')
                 ->where(function ($q) use ($leaveRequest) {
@@ -959,7 +1278,7 @@ class LeaveController extends Controller
         $title = 'New Leave Request';
         if ($user->role === 'hod') {
             $title = 'New Leave Request from HOD';
-        } elseif ($isProcurement) {
+        } elseif ($isHR) {
             $title = 'New Leave Request (Procurement)';
         }
         

@@ -194,17 +194,26 @@ const GpsAttendance = () => {
       return;
     }
 
+    // Check if GPS is required for this user's department
+    const gpsRequired = accessInfo?.primary_branch?.gps_required !== false && 
+                        accessInfo?.department_attendance?.gps_required !== false;
+
     try {
       setActionLoading(true);
       setActionResult(null);
       
-      const coords = await getLocation();
-      if (!coords) return;
+      let coords = null;
+      
+      // Only get location if GPS is required
+      if (gpsRequired) {
+        coords = await getLocation();
+        if (!coords) return;
+      }
 
       const data = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        gps_accuracy: coords.accuracy,
+        latitude: coords?.latitude || null,
+        longitude: coords?.longitude || null,
+        gps_accuracy: coords?.accuracy || null,
         device_info: getDeviceInfo(),
         is_department_based: isDepartmentBased,
         department_id: accessInfo?.department_attendance?.department_id || accessInfo?.primary_branch?.department_id,
@@ -239,17 +248,26 @@ const GpsAttendance = () => {
       return;
     }
 
+    // Check if GPS is required for this user's department
+    const gpsRequired = accessInfo?.primary_branch?.gps_required !== false && 
+                        accessInfo?.department_attendance?.gps_required !== false;
+
     try {
       setActionLoading(true);
       setActionResult(null);
       
-      const coords = await getLocation();
-      if (!coords) return;
+      let coords = null;
+      
+      // Only get location if GPS is required
+      if (gpsRequired) {
+        coords = await getLocation();
+        if (!coords) return;
+      }
 
       const data = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        gps_accuracy: coords.accuracy,
+        latitude: coords?.latitude || null,
+        longitude: coords?.longitude || null,
+        gps_accuracy: coords?.accuracy || null,
         attendance_id: todayStatus.attendance.id,
         device_info: getDeviceInfo(),
       };
