@@ -471,7 +471,7 @@ export default function Schedule() {
   };
 
   const handleDelete = async (plan) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Schedule',
       message: 'Are you sure you want to delete this scheduled plan?',
       confirmText: 'Delete',

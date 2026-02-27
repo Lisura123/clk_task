@@ -36,11 +36,27 @@ export default function LeaveApproval() {
   const [rejectReason, setRejectReason] = useState('');
   const [processing, setProcessing] = useState(false);
   
+  // Check if user is HR (not admin or hod)
+  const isHRUser = !['admin', 'hod'].includes(user?.role) && (
+    (user?.department_name?.toLowerCase() === 'hr') || 
+    (user?.department?.toLowerCase() === 'hr') ||
+    (user?.department_id == 12) ||
+    (user?.departmentRelation?.name?.toLowerCase() === 'hr')
+  );
+  const isAdminOrHod = ['admin', 'hod'].includes(user?.role);
+  
   // Filters
   const [statusFilter, setStatusFilter] = useState('all');
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [yearFilter, setYearFilter] = useState(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    // HR users default to 'all' tab since they don't have pending leaves to approve
+    if (isHRUser) {
+      setActiveTab('all');
+    }
+  }, [isHRUser]);
 
   useEffect(() => {
     fetchData();
@@ -49,19 +65,35 @@ export default function LeaveApproval() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [pendingRes, allRes, statsRes, teamRes, deptsRes] = await Promise.all([
-        leaveAPI.getPendingLeaves(),
-        leaveAPI.getAllLeaves({ year: yearFilter, department_id: departmentFilter !== 'all' ? departmentFilter : undefined }),
-        leaveAPI.getStatistics({ year: yearFilter }),
-        leaveAPI.getTeamOnLeave(),
-        departmentAPI.getAllDepartments(),
-      ]);
       
-      setPendingLeaves(pendingRes.data.data || []);
-      setAllLeaves(allRes.data.data || []);
-      setStatistics(statsRes.data.data || null);
-      setTeamOnLeave(teamRes.data.data || []);
-      setDepartments(deptsRes.data || []);
+      if (isHRUser) {
+        // HR users: only fetch all leaves (approved/hod_approved) and departments
+        const [allRes, deptsRes] = await Promise.all([
+          leaveAPI.getAllLeaves({ year: yearFilter, department_id: departmentFilter !== 'all' ? departmentFilter : undefined }),
+          departmentAPI.getAllDepartments(),
+        ]);
+        
+        setAllLeaves(allRes.data.data || []);
+        setDepartments(deptsRes.data || []);
+        setPendingLeaves([]);
+        setStatistics(null);
+        setTeamOnLeave([]);
+      } else {
+        // Admin/HOD: fetch everything
+        const [pendingRes, allRes, statsRes, teamRes, deptsRes] = await Promise.all([
+          leaveAPI.getPendingLeaves(),
+          leaveAPI.getAllLeaves({ year: yearFilter, department_id: departmentFilter !== 'all' ? departmentFilter : undefined }),
+          leaveAPI.getStatistics({ year: yearFilter }),
+          leaveAPI.getTeamOnLeave(),
+          departmentAPI.getAllDepartments(),
+        ]);
+        
+        setPendingLeaves(pendingRes.data.data || []);
+        setAllLeaves(allRes.data.data || []);
+        setStatistics(statsRes.data.data || null);
+        setTeamOnLeave(teamRes.data.data || []);
+        setDepartments(deptsRes.data || []);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -70,7 +102,7 @@ export default function LeaveApproval() {
   };
 
   const handleApprove = async (id) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       type: 'success',
       title: 'Approve Leave Request',
       message: 'Are you sure you want to approve this leave request?',
@@ -169,12 +201,16 @@ export default function LeaveApproval() {
     <div className="pb-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-black">Leave Management</h1>
-        <p className="text-sm sm:text-base text-gray-600 mt-1">Manage and approve leave requests</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-black">
+          {isHRUser ? 'Approved Leave Requests' : 'Leave Management'}
+        </h1>
+        <p className="text-sm sm:text-base text-gray-600 mt-1">
+          {isHRUser ? 'View approved and HOD-approved leave requests' : 'Manage and approve leave requests'}
+        </p>
       </div>
 
-      {/* Statistics */}
-      {statistics && (
+      {/* Statistics - only for Admin/HOD */}
+      {statistics && isAdminOrHod && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
           <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
             <div className="flex items-center gap-2 text-yellow-600 mb-1">
@@ -241,21 +277,23 @@ export default function LeaveApproval() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-4 border-b border-gray-200 overflow-x-auto pb-px">
-        <button
-          onClick={() => setActiveTab('pending')}
-          className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-            activeTab === 'pending'
-              ? 'border-red-600 text-red-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Pending Requests
-          {pendingLeaves.length > 0 && (
-            <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs">
-              {pendingLeaves.length}
-            </span>
-          )}
-        </button>
+        {isAdminOrHod && (
+          <button
+            onClick={() => setActiveTab('pending')}
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+              activeTab === 'pending'
+                ? 'border-red-600 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Pending Requests
+            {pendingLeaves.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs">
+                {pendingLeaves.length}
+              </span>
+            )}
+          </button>
+        )}
         <button
           onClick={() => setActiveTab('all')}
           className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
@@ -264,7 +302,7 @@ export default function LeaveApproval() {
               : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          All Requests
+          {isHRUser ? 'Approved Requests' : 'All Requests'}
         </button>
       </div>
 
@@ -288,12 +326,21 @@ export default function LeaveApproval() {
               className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:outline-none"
             >
               <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="cancelled">Cancelled</option>
+              {isHRUser ? (
+                <>
+                  <option value="approved">Approved</option>
+                  <option value="hod_approved">HOD Approved</option>
+                </>
+              ) : (
+                <>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="cancelled">Cancelled</option>
+                </>
+              )}
             </select>
-            {user?.role === 'admin' && (
+            {(user?.role === 'admin' || isHRUser) && (
               <select
                 value={departmentFilter}
                 onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -373,6 +420,12 @@ export default function LeaveApproval() {
                       {new Date(leave.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(leave.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
                     <p className="text-sm text-gray-500 line-clamp-2">{leave.reason}</p>
+                    {/* Show Lieu date if applicable */}
+                    {leave.lieu_date && (
+                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                        🔄 Lieu for working on {new Date(leave.lieu_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    )}
                     {/* Show HOD approval info if applicable */}
                     {leave.status === 'hod_approved' && leave.hod_approved_by && (
                       <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
@@ -457,6 +510,9 @@ export default function LeaveApproval() {
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {new Date(leave.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(leave.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {leave.lieu_date && (
+                          <p className="text-xs text-amber-600 mt-0.5">🔄 Worked: {new Date(leave.lieu_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">{leave.total_days}</td>
                       <td className="px-4 py-3">
@@ -625,6 +681,15 @@ export default function LeaveApproval() {
                 <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">{selectedLeave.reason}</p>
               </div>
 
+              {selectedLeave.lieu_date && (
+                <div>
+                  <h4 className="text-sm font-medium text-amber-700 mb-1">🔄 Lieu Leave — Date Worked</h4>
+                  <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">
+                    Employee worked on {new Date(selectedLeave.lieu_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} and is taking compensatory leave.
+                  </p>
+                </div>
+              )}
+
               {selectedLeave.rejection_reason && (
                 <div>
                   <h4 className="text-sm font-medium text-red-700 mb-1">Rejection Reason</h4>
@@ -641,8 +706,8 @@ export default function LeaveApproval() {
                 </div>
               )}
 
-              {/* Action Buttons for Pending or HOD Approved */}
-              {(selectedLeave.status === 'pending' || selectedLeave.status === 'hod_approved') && (
+              {/* Action Buttons for Pending or HOD Approved - Only for Admin/HOD */}
+              {isAdminOrHod && (selectedLeave.status === 'pending' || selectedLeave.status === 'hod_approved') && (
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={() => handleApprove(selectedLeave.id)}

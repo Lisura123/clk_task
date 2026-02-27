@@ -147,7 +147,7 @@ const CommentThread = ({ comment, onReply, onEdit, onDelete, participants, level
                 </button>
                 <button
                   onClick={async () => {
-                    const confirmed = await confirmDialog({
+                    const confirmed = await confirmDialog.show({
                       title: 'Delete Comment',
                       message: 'Are you sure you want to delete this comment?',
                       confirmText: 'Delete',

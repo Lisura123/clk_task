@@ -134,7 +134,7 @@ export default function LeaveSettings() {
   };
 
   const handleDeleteType = async (id) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Leave Type',
       message: 'Are you sure you want to delete this leave type?',
       confirmText: 'Delete',
@@ -202,7 +202,7 @@ export default function LeaveSettings() {
   };
 
   const handleDeleteHoliday = async (id) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Holiday',
       message: 'Are you sure you want to delete this holiday?',
       confirmText: 'Delete',

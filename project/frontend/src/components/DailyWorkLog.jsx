@@ -85,7 +85,7 @@ export default function DailyWorkLog({ task, onClose, onUpdate }) {
   };
 
   const handleDelete = async (logId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Work Log',
       message: 'Are you sure you want to delete this work log?',
       confirmText: 'Delete',

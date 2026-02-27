@@ -329,7 +329,7 @@ export default function Users() {
   };
 
   const handleDelete = async (userId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       type: 'danger',
       title: 'Delete User',
       message: 'Are you sure you want to delete this user? This action cannot be undone.',

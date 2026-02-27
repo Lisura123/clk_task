@@ -106,7 +106,7 @@ export default function GroupChat({ group, onClose }) {
   };
 
   const handleDeleteMessage = async (messageId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Message',
       message: 'Are you sure you want to delete this message?',
       confirmText: 'Delete',

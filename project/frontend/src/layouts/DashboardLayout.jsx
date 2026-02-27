@@ -294,7 +294,7 @@ export default function DashboardLayout() {
     { name: 'Attendance Requests', href: '/dashboard/attendance-requests', icon: ClipboardCheck, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', tourId: 'attendance-requests' },
     { name: 'Showroom Management', href: '/dashboard/branches', icon: Building2, roles: ['admin'], category: 'attendance', tourId: 'branches' },
     { name: 'My Leaves', href: '/dashboard/my-leaves', icon: Palmtree, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', tourId: 'my-leaves' },
-    { name: 'Leave Approval', href: '/dashboard/leave-approval', icon: CalendarDays, roles: ['admin', 'hod'], category: 'leave', tourId: 'leaves' },
+    { name: 'Leave Approval', href: '/dashboard/leave-approval', icon: CalendarDays, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leaves' },
     { name: 'Leave Balances', href: '/dashboard/leave-balances', icon: Wallet, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-balances' },
     { name: 'Leave Settings', href: '/dashboard/leave-settings', icon: Settings, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-settings' },
     { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['admin', 'hod'], category: 'admin', tourId: 'users' },

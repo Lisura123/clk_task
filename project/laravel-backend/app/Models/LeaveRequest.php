@@ -16,6 +16,7 @@ class LeaveRequest extends Model
         'department_id',
         'start_date',
         'end_date',
+        'lieu_date',
         'total_days',
         'start_half',
         'end_half',
@@ -40,6 +41,7 @@ class LeaveRequest extends Model
     protected $casts = [
         'start_date' => 'date',
         'end_date' => 'date',
+        'lieu_date' => 'date',
         'total_days' => 'decimal:1',
         'approved_at' => 'datetime',
         'hod_approved_at' => 'datetime',

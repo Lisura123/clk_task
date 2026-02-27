@@ -157,7 +157,7 @@ const Notifications = () => {
   };
 
   const handleDelete = async (notificationId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Notification',
       message: 'Are you sure you want to delete this notification?',
       confirmText: 'Delete',
@@ -188,7 +188,7 @@ const Notifications = () => {
   };
 
   const handleDeleteAllRead = async () => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Read Notifications',
       message: 'Are you sure you want to delete all read notifications?',
       confirmText: 'Delete All',

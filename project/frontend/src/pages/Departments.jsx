@@ -95,7 +95,7 @@ export default function Departments() {
   };
 
   const handleDeleteDepartment = async (deptId, deptName) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       type: 'danger',
       title: 'Delete Department',
       message: `Are you sure you want to delete "${deptName}"? This action cannot be undone.`,

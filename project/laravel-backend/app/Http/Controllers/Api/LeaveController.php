@@ -781,34 +781,70 @@ class LeaveController extends Controller
     {
         $user = $request->user();
 
-        $validator = Validator::make($request->all(), [
+        // Check if this is a Lieu Leave type
+        $leaveType = null;
+        if ($request->leave_type_id) {
+            $leaveType = LeaveType::find($request->leave_type_id);
+        }
+        $isLieuLeave = $leaveType && strtolower($leaveType->code) === 'lieu';
+
+        // Build validation rules - Lieu Leave allows past dates
+        $startDateRule = $isLieuLeave ? 'required|date' : 'required|date|after_or_equal:today';
+        
+        $rules = [
             'leave_type_id' => 'required|exists:leave_types,id',
-            'start_date' => 'required|date|after_or_equal:today',
+            'start_date' => $startDateRule,
             'end_date' => 'required|date|after_or_equal:start_date',
             'start_half' => 'in:full,first_half,second_half',
             'end_half' => 'in:full,first_half,second_half',
             'reason' => 'required|string|max:1000',
             'contact_phone' => 'nullable|string|max:20',
             'days_note' => 'nullable|string|max:500',
+            'lieu_date' => $isLieuLeave ? 'required|date|before_or_equal:today' : 'nullable|date',
             'emergency_contact' => 'nullable|string|max:100',
             'emergency_phone' => 'nullable|string|max:20',
             'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
-        ]);
+        ];
+
+        $messages = [
+            'lieu_date.required' => 'Please specify the date you worked that entitles you to this lieu leave.',
+            'lieu_date.before_or_equal' => 'The worked date must be today or a past date.',
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $leaveType = LeaveType::findOrFail($request->leave_type_id);
+        if (!$leaveType) {
+            $leaveType = LeaveType::findOrFail($request->leave_type_id);
+        }
 
-        // Check minimum notice days
+        // Check minimum notice days (skip for Lieu Leave)
         $startDate = Carbon::parse($request->start_date);
-        $noticeDays = now()->diffInDays($startDate, false);
-        
-        if ($noticeDays < $leaveType->min_notice_days) {
-            return response()->json([
-                'message' => "This leave type requires at least {$leaveType->min_notice_days} days notice."
-            ], 422);
+        if (!$isLieuLeave) {
+            $noticeDays = now()->diffInDays($startDate, false);
+            
+            if ($noticeDays < $leaveType->min_notice_days) {
+                return response()->json([
+                    'message' => "This leave type requires at least {$leaveType->min_notice_days} days notice."
+                ], 422);
+            }
+        }
+
+        // For Lieu Leave, validate the worked date hasn't been used already
+        if ($isLieuLeave && $request->lieu_date) {
+            $lieuDateUsed = LeaveRequest::where('user_id', $user->id)
+                ->where('lieu_date', $request->lieu_date)
+                ->whereIn('status', ['pending', 'hod_approved', 'approved'])
+                ->exists();
+
+            if ($lieuDateUsed) {
+                return response()->json([
+                    'message' => 'You have already applied for lieu leave for this worked date.'
+                ], 422);
+            }
         }
 
         // Calculate total days
@@ -880,6 +916,7 @@ class LeaveController extends Controller
             'department_id' => $user->department_id,
             'start_date' => $request->start_date,
             'end_date' => $request->end_date,
+            'lieu_date' => $isLieuLeave ? $request->lieu_date : null,
             'total_days' => $totalDays,
             'start_half' => $request->start_half ?? 'full',
             'end_half' => $request->end_half ?? 'full',

@@ -271,7 +271,7 @@ const TaskDetails = () => {
   };
 
   const handleDeleteLink = async (linkId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Link',
       message: 'Are you sure you want to delete this link?',
       confirmText: 'Delete',
@@ -328,7 +328,7 @@ const TaskDetails = () => {
   };
 
   const handleDeleteAttachment = async (attachmentId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Attachment',
       message: 'Are you sure you want to delete this attachment?',
       confirmText: 'Delete',
@@ -497,7 +497,7 @@ const TaskDetails = () => {
   };
 
   const handleDelete = async () => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Task',
       message: 'Are you sure you want to delete this task? This action cannot be undone.',
       confirmText: 'Delete',

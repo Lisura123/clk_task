@@ -192,7 +192,7 @@ const TimeTracking = ({ taskId, estimatedHours = 0, onTaskUpdate }) => {
   };
 
   const handleDeleteEntry = async (entryId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Time Entry',
       message: 'Are you sure you want to delete this time entry?',
       confirmText: 'Delete',

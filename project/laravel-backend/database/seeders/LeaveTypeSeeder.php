@@ -27,7 +27,7 @@ class LeaveTypeSeeder extends Seeder
                 'color' => '#3B82F6', // Blue
             ],
             [
-                'name' => 'Leave Leave',
+                'name' => 'Lieu Leave',
                 'code' => 'LIEU',
                 'description' => 'Compensatory leave for working on official holidays or leave days. Employees who work on designated off days can take time off in lieu.',
                 'default_days_per_year' => 0, // Not allocated by default, earned by working on holidays

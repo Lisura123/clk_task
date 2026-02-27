@@ -190,7 +190,7 @@ export default function DepartmentDetails() {
   };
 
   const handleDeleteGroup = async (groupId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Group',
       message: 'Are you sure you want to delete this group?',
       confirmText: 'Delete',
@@ -266,7 +266,7 @@ export default function DepartmentDetails() {
   };
 
   const handleDeleteSchedule = async (scheduleId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Schedule',
       message: 'Are you sure you want to delete this schedule?',
       confirmText: 'Delete',
@@ -349,7 +349,7 @@ export default function DepartmentDetails() {
   };
 
   const handleDeleteTask = async (taskId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Delete Task',
       message: 'Are you sure you want to delete this task?',
       confirmText: 'Delete',

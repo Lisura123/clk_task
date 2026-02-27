@@ -44,6 +44,7 @@ export default function MyLeaves() {
     end_half: 'full',
     reason: '',
     days_note: '',
+    lieu_date: '',
     emergency_contact: '',
     emergency_phone: '',
     attachment: null,
@@ -104,6 +105,7 @@ export default function MyLeaves() {
       data.append('end_half', formData.end_half);
       data.append('reason', formData.reason);
       if (formData.days_note) data.append('days_note', formData.days_note);
+      if (formData.lieu_date) data.append('lieu_date', formData.lieu_date);
       if (formData.emergency_contact) data.append('emergency_contact', formData.emergency_contact);
       if (formData.emergency_phone) data.append('emergency_phone', formData.emergency_phone);
       if (formData.attachment) data.append('attachment', formData.attachment);
@@ -126,7 +128,7 @@ export default function MyLeaves() {
   };
 
   const handleCancelLeave = async (id) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       type: 'warning',
       title: 'Cancel Leave Request',
       message: 'Are you sure you want to cancel this leave request?',
@@ -174,6 +176,7 @@ export default function MyLeaves() {
       end_half: 'full',
       reason: '',
       days_note: '',
+      lieu_date: '',
       emergency_contact: '',
       emergency_phone: '',
       attachment: null,
@@ -370,6 +373,11 @@ export default function MyLeaves() {
                   {leave.days_note && (
                     <p className="text-sm text-blue-500 mt-1 line-clamp-1">📅 {leave.days_note}</p>
                   )}
+                  {leave.lieu_date && (
+                    <p className="text-sm text-amber-600 mt-1 line-clamp-1">
+                      🔄 Lieu for working on {new Date(leave.lieu_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -447,26 +455,53 @@ export default function MyLeaves() {
                 )}
               </div>
 
+              {/* Lieu Leave - Date Worked Field */}
+              {selectedLeaveType?.code?.toLowerCase() === 'lieu' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-amber-800 mb-1">
+                    📅 Date You Worked (that entitles this lieu leave) *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.lieu_date}
+                    onChange={(e) => setFormData({ ...formData, lieu_date: e.target.value })}
+                    max={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                    required
+                  />
+                  <p className="text-xs text-amber-600 mt-1">
+                    Select the date you actually worked (e.g., a holiday or day off) that earns you this compensatory leave
+                  </p>
+                  {formErrors.lieu_date && (
+                    <p className="text-xs text-red-500 mt-1">{formErrors.lieu_date}</p>
+                  )}
+                </div>
+              )}
+
               {/* Date Range */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {selectedLeaveType?.code?.toLowerCase() === 'lieu' ? 'Leave Date *' : 'Start Date *'}
+                  </label>
                   <input
                     type="date"
                     value={formData.start_date}
                     onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                    min={new Date().toISOString().split('T')[0]}
+                    {...(selectedLeaveType?.code?.toLowerCase() !== 'lieu' ? { min: new Date().toISOString().split('T')[0] } : {})}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {selectedLeaveType?.code?.toLowerCase() === 'lieu' ? 'Leave End Date *' : 'End Date *'}
+                  </label>
                   <input
                     type="date"
                     value={formData.end_date}
                     onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                    min={formData.start_date || new Date().toISOString().split('T')[0]}
+                    min={formData.start_date || (selectedLeaveType?.code?.toLowerCase() !== 'lieu' ? new Date().toISOString().split('T')[0] : undefined)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-none"
                     required
                   />
@@ -753,6 +788,15 @@ export default function MyLeaves() {
                 <div>
                   <h4 className="text-sm font-medium text-gray-700 mb-1">Days Specification</h4>
                   <p className="text-sm text-gray-600 bg-blue-50 rounded-lg p-3">{selectedLeave.days_note}</p>
+                </div>
+              )}
+
+              {selectedLeave.lieu_date && (
+                <div>
+                  <h4 className="text-sm font-medium text-amber-700 mb-1">🔄 Lieu Leave — Date Worked</h4>
+                  <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">
+                    Employee worked on {new Date(selectedLeave.lieu_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} and is taking compensatory leave.
+                  </p>
                 </div>
               )}
 

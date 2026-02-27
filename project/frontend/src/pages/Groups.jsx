@@ -126,7 +126,7 @@ export default function Groups() {
   };
 
   const handleDelete = async (groupId) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       type: 'danger',
       title: 'Delete Group',
       message: 'Are you sure you want to delete this group? This action cannot be undone.',

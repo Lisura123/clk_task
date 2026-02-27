@@ -38,12 +38,12 @@ export default function PendingRegistrations() {
   };
 
   const handleApprove = async (user) => {
-    const confirmed = await confirmDialog({
+    const confirmed = await confirmDialog.show({
       title: 'Approve Registration',
       message: `Are you sure you want to approve ${user.name}?`,
       confirmText: 'Approve',
       cancelText: 'Cancel',
-      type: 'info'
+      type: 'success'
     });
     if (!confirmed) return;
     
