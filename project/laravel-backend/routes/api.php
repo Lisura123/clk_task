@@ -211,6 +211,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/attendance/template', [AttendanceController::class, 'downloadTemplate']);
     Route::get('/attendance/export', [AttendanceController::class, 'export']); // Export attendance to CSV
     Route::post('/attendance/upload', [AttendanceController::class, 'upload']); // Procurement/Admin only
+    Route::post('/attendance/upload-biometric', [AttendanceController::class, 'uploadBiometric']); // Biometric device report format
     Route::get('/users/{userId}/attendance', [AttendanceController::class, 'userAttendance']); // Get attendance for specific user
     Route::get('/attendance/{id}', [AttendanceController::class, 'show']);
     Route::put('/attendance/{id}', [AttendanceController::class, 'update']); // Procurement only - update record

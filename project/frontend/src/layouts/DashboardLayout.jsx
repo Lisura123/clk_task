@@ -294,7 +294,7 @@ export default function DashboardLayout() {
     { name: 'Attendance Requests', href: '/dashboard/attendance-requests', icon: ClipboardCheck, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'attendance', tourId: 'attendance-requests' },
     { name: 'Showroom Management', href: '/dashboard/branches', icon: Building2, roles: ['admin'], category: 'attendance', tourId: 'branches' },
     { name: 'My Leaves', href: '/dashboard/my-leaves', icon: Palmtree, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', tourId: 'my-leaves' },
-    { name: 'Leave Approval', href: '/dashboard/leave-approval', icon: CalendarDays, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leaves' },
+    { name: 'Leave Approval', href: '/dashboard/leave-approval', icon: CalendarDays, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminHodOrHROnly: true, tourId: 'leaves' },
     { name: 'Leave Balances', href: '/dashboard/leave-balances', icon: Wallet, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-balances' },
     { name: 'Leave Settings', href: '/dashboard/leave-settings', icon: Settings, roles: ['admin', 'hod', 'senior_employee', 'employee'], category: 'leave', adminOrHROnly: true, tourId: 'leave-settings' },
     { name: 'Users', href: '/dashboard/users', icon: Users, roles: ['admin', 'hod'], category: 'admin', tourId: 'users' },
@@ -321,10 +321,14 @@ export default function DashboardLayout() {
 
   // Check if user is admin
   const isAdminUser = user?.role === 'admin';
+  const isHodUser = user?.role === 'hod';
 
   const filteredNavigation = navigation.filter(item => {
     // Check role first
     if (!item.roles.includes(user?.role)) return false;
+    
+    // If item is admin, HOD or HR only, check accordingly
+    if (item.adminHodOrHROnly && !isAdminUser && !isHodUser && !isHRUser) return false;
     
     // If item is admin or HR only, check if user is admin OR from HR
     if (item.adminOrHROnly && !isAdminUser && !isHRUser) return false;

@@ -103,6 +103,8 @@ export default function Attendance() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadFormat, setUploadFormat] = useState('standard'); // 'standard' | 'biometric'
+  const [biometricPeriodStart, setBiometricPeriodStart] = useState('');
   const [editingRecord, setEditingRecord] = useState(null);
   const [editForm, setEditForm] = useState({ in_time: '', out_time: '' });
   
@@ -192,18 +194,31 @@ export default function Attendance() {
     fetchStatistics();
   };
 
+  const handleFormatChange = (format) => {
+    setUploadFormat(format);
+    setSelectedFile(null);
+    setUploadResult(null);
+  };
+
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const validTypes = [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
-        'application/vnd.ms-excel', 
-        'text/csv',
-        'application/pdf'
-      ];
-      if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls|csv|pdf)$/i)) {
-        toast.error('Please select a valid Excel, CSV, or PDF file');
-        return;
+      if (uploadFormat === 'biometric') {
+        if (!file.name.match(/\.(xlsx|xls)$/i)) {
+          toast.error('Biometric report format requires an Excel file (.xlsx or .xls)');
+          return;
+        }
+      } else {
+        const validTypes = [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv',
+          'application/pdf'
+        ];
+        if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls|csv|pdf)$/i)) {
+          toast.error('Please select a valid Excel, CSV, or PDF file');
+          return;
+        }
       }
       setSelectedFile(file);
       setUploadResult(null);
@@ -215,13 +230,24 @@ export default function Attendance() {
       toast.error('Please select a file first');
       return;
     }
+
+    if (uploadFormat === 'biometric' && !biometricPeriodStart) {
+      toast.error('Please select the period start date for the biometric report');
+      return;
+    }
     
     try {
       setUploading(true);
       const formData = new FormData();
       formData.append('file', selectedFile);
+
+      let uploadEndpoint = '/attendance/upload';
+      if (uploadFormat === 'biometric') {
+        uploadEndpoint = '/attendance/upload-biometric';
+        formData.append('period_start', biometricPeriodStart);
+      }
       
-      const response = await api.post('/attendance/upload', formData, {
+      const response = await api.post(uploadEndpoint, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -1077,6 +1103,8 @@ export default function Attendance() {
                     setShowUploadModal(false);
                     setSelectedFile(null);
                     setUploadResult(null);
+                    setUploadFormat('standard');
+                    setBiometricPeriodStart('');
                   }}
                   className="p-2 hover:bg-white/20 rounded-lg transition-colors"
                 >
@@ -1086,6 +1114,61 @@ export default function Attendance() {
             </div>
 
             <div className="p-6 space-y-5">
+              {/* Format Selector */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Select Report Format</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleFormatChange('standard')}
+                    className={`flex flex-col items-start gap-1.5 p-3 rounded-xl border-2 transition-all text-left ${
+                      uploadFormat === 'standard'
+                        ? 'border-red-500 bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className={`w-4 h-4 ${uploadFormat === 'standard' ? 'text-red-600' : 'text-gray-400'}`} />
+                      <span className={`text-sm font-semibold ${uploadFormat === 'standard' ? 'text-red-700' : 'text-gray-700'}`}>Standard</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Simple row-per-day format (Date, Emp Code, In, Out)</p>
+                  </button>
+
+                  <button
+                    onClick={() => handleFormatChange('biometric')}
+                    className={`flex flex-col items-start gap-1.5 p-3 rounded-xl border-2 transition-all text-left ${
+                      uploadFormat === 'biometric'
+                        ? 'border-red-500 bg-red-50'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className={`w-4 h-4 ${uploadFormat === 'biometric' ? 'text-red-600' : 'text-gray-400'}`} />
+                      <span className={`text-sm font-semibold ${uploadFormat === 'biometric' ? 'text-red-700' : 'text-gray-700'}`}>Biometric Report</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Device export with Person ID blocks and date columns</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Biometric Period Start Date */}
+              {uploadFormat === 'biometric' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    Report Period Start Date <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="date"
+                      value={biometricPeriodStart}
+                      onChange={(e) => setBiometricPeriodStart(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">The first date shown in the report (e.g. 2026-03-26 for a late-March to April report)</p>
+                </div>
+              )}
+
               {/* File Upload Area */}
               <div 
                 className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
@@ -1096,7 +1179,7 @@ export default function Attendance() {
               >
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.csv,.pdf"
+                  accept={uploadFormat === 'biometric' ? '.xlsx,.xls' : '.xlsx,.xls,.csv,.pdf'}
                   onChange={handleFileChange}
                   className="hidden"
                   id="file-upload"
@@ -1122,7 +1205,9 @@ export default function Attendance() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-700">Click to select a file</p>
-                        <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv, .pdf</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {uploadFormat === 'biometric' ? 'Supports .xlsx, .xls' : 'Supports .xlsx, .xls, .csv, .pdf'}
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1135,17 +1220,37 @@ export default function Attendance() {
                   <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
                     <AlertCircle className="w-4 h-4 text-blue-600" />
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800 mb-2">Expected Column Format:</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                      {['Date', 'Emp Code', 'Employee', 'FP Code', 'Department', 'In', 'Out'].map((col) => (
-                        <span key={col} className="flex items-center gap-1 text-blue-700">
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                          {col}
-                        </span>
-                      ))}
+                  {uploadFormat === 'standard' ? (
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800 mb-2">Expected Column Format:</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                        {['Date', 'Emp Code', 'Employee', 'FP Code', 'Department', 'In', 'Out'].map((col) => (
+                          <span key={col} className="flex items-center gap-1 text-blue-700">
+                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                            {col}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800 mb-2">Biometric Report Structure:</p>
+                      <div className="space-y-1 text-xs text-blue-700">
+                        {[
+                          'Person ID block — one block per employee',
+                          'Person ID | Employee Name | Department rows',
+                          'Date row — day numbers as column headers',
+                          'Check-in1 row — check-in time per day',
+                          'Check-out1 row — check-out time per day',
+                        ].map((line) => (
+                          <p key={line} className="flex items-start gap-1.5">
+                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1 flex-shrink-0"></div>
+                            {line}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1213,13 +1318,15 @@ export default function Attendance() {
 
               {/* Actions */}
               <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleDownloadTemplate}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium"
-                >
-                  <Download className="w-4 h-4" />
-                  Download Template
-                </button>
+                {uploadFormat === 'standard' && (
+                  <button
+                    onClick={handleDownloadTemplate}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all font-medium"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Template
+                  </button>
+                )}
                 <button
                   onClick={handleUpload}
                   disabled={!selectedFile || uploading}

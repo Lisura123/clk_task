@@ -1256,4 +1256,290 @@ class AttendanceController extends Controller
             'latest_month' => $latestMonth,
         ]);
     }
+
+    // =========================================================================
+    // BIOMETRIC REPORT UPLOAD
+    // =========================================================================
+
+    /**
+     * Upload a biometric device Excel report and import attendance records.
+     *
+     * The biometric format has per-employee blocks:
+     *   Row: Person ID | <id>  ... Employee Name | <name> ... Department | <dept>
+     *   Row: Date | <day1> | <day2> | ...
+     *   Row: Check-in1 | <time or -> | ...
+     *   Row: Check-out1 | <time or -> | ...
+     *   ... (OT, Late, Attended, Status, Summary rows – ignored)
+     *
+     * The period_start date (e.g. 2026-03-26) is used to resolve bare day numbers
+     * into full dates: days >= period_start day → same month, days < → next month.
+     */
+    public function uploadBiometric(Request $request)
+    {
+        $user = $request->user();
+
+        if (!$user->isHR() && !$user->isAdmin()) {
+            return response()->json(['message' => 'Unauthorized. Only HR department can upload attendance.'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'file'         => 'required|file|mimes:xlsx,xls|max:10240',
+            'period_start' => 'required|date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        try {
+            $data = $this->parseBiometricExcel($request->file('file'), $request->period_start);
+
+            if (empty($data)) {
+                return response()->json(['message' => 'No attendance data found in the biometric report. Make sure the file is in the correct biometric device format.'], 422);
+            }
+
+            $imported = 0;
+            $updated  = 0;
+            $skipped  = 0;
+
+            foreach ($data as $row) {
+                if (empty($row['emp_code']) || empty($row['date'])) {
+                    $skipped++;
+                    continue;
+                }
+
+                $matchedUser = $this->findUserByEmpCode($row['emp_code']);
+
+                $attendanceData = [
+                    'date'               => $row['date'],
+                    'emp_code'           => $row['emp_code'],
+                    'dept_name'          => $row['dept_name'] ?? null,
+                    'in_time'            => $row['in_time'],
+                    'out_time'           => $row['out_time'],
+                    'user_id'            => $matchedUser ? $matchedUser->id : null,
+                    'attendance_method'  => Attendance::METHOD_UPLOAD,
+                ];
+
+                $existing = Attendance::where('emp_code', $row['emp_code'])
+                                      ->whereDate('date', $row['date'])
+                                      ->first();
+
+                if ($existing) {
+                    $existing->update($attendanceData);
+                    $updated++;
+                } else {
+                    Attendance::create($attendanceData);
+                    $imported++;
+                }
+            }
+
+            return response()->json([
+                'success'      => true,
+                'message'      => 'Biometric report imported successfully',
+                'imported'     => $imported,
+                'updated'      => $updated,
+                'skipped'      => $skipped,
+                'errors'       => [],
+                'total_errors' => 0,
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Biometric attendance import error: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to process biometric report: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Parse a biometric device Excel file into flat attendance rows.
+     */
+    private function parseBiometricExcel($file, string $periodStart): array
+    {
+        $allRows    = $this->readRawRows($file);
+        $results    = [];
+
+        $periodDate = Carbon::parse($periodStart);
+        $periodDay  = $periodDate->day;
+
+        $currentEmployee = null;
+        $dateColumns     = [];   // colIndex => 'Y-m-d'
+        $checkIns        = [];   // colIndex => time string|null
+
+        foreach ($allRows as $row) {
+            if (empty($row)) {
+                continue;
+            }
+
+            $firstCell = strtolower(trim((string)($row[0] ?? '')));
+
+            // ── Start of a new employee block ───────────────────────────────
+            if (str_contains($firstCell, 'person id')) {
+                $currentEmployee = $this->extractBiometricEmployeeInfo($row);
+                $dateColumns     = [];
+                $checkIns        = [];
+                continue;
+            }
+
+            if (!$currentEmployee) {
+                continue;
+            }
+
+            // ── Date header row ──────────────────────────────────────────────
+            if ($firstCell === 'date') {
+                $dateColumns = $this->extractBiometricDateColumns($row, $periodDate, $periodDay);
+                continue;
+            }
+
+            if (empty($dateColumns)) {
+                continue;
+            }
+
+            // ── Check-in row ─────────────────────────────────────────────────
+            if (str_contains($firstCell, 'check-in') || str_contains($firstCell, 'check in')) {
+                $checkIns = [];
+                foreach ($dateColumns as $colIndex => $date) {
+                    $val             = trim((string)($row[$colIndex] ?? ''));
+                    $checkIns[$colIndex] = ($val === '-' || $val === '' || $val === '#') ? null : $val;
+                }
+                continue;
+            }
+
+            // ── Check-out row — build records here ───────────────────────────
+            if (str_contains($firstCell, 'check-out') || str_contains($firstCell, 'check out')) {
+                foreach ($dateColumns as $colIndex => $date) {
+                    $checkin = $checkIns[$colIndex] ?? null;
+                    if (!$checkin) {
+                        continue; // absent that day
+                    }
+
+                    $val     = trim((string)($row[$colIndex] ?? ''));
+                    $checkout = ($val === '-' || $val === '' || $val === '#') ? null : $val;
+
+                    $results[] = [
+                        'emp_code' => $currentEmployee['emp_code'],
+                        'dept_name' => $currentEmployee['dept_name'],
+                        'date'     => $date,
+                        'in_time'  => $this->parseTime($checkin),
+                        'out_time' => $checkout ? $this->parseTime($checkout) : null,
+                    ];
+                }
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Read all rows from an XLSX file as plain arrays (no header mapping).
+     */
+    private function readRawRows($file): array
+    {
+        $allRows = [];
+
+        if (class_exists('\OpenSpout\Reader\XLSX\Reader')) {
+            $reader = new \OpenSpout\Reader\XLSX\Reader();
+            $reader->open($file->getPathname());
+            foreach ($reader->getSheetIterator() as $sheet) {
+                foreach ($sheet->getRowIterator() as $row) {
+                    $rowData = [];
+                    foreach ($row->getCells() as $cell) {
+                        $val       = $cell->getValue();
+                        $rowData[] = ($val instanceof \DateTimeInterface) ? $val->format('Y-m-d') : $val;
+                    }
+                    $allRows[] = $rowData;
+                }
+                break; // first sheet only
+            }
+            $reader->close();
+        } elseif (class_exists('\PhpOffice\PhpSpreadsheet\IOFactory')) {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getPathname());
+            $allRows     = $spreadsheet->getActiveSheet()->toArray();
+        }
+
+        return $allRows;
+    }
+
+    /**
+     * Extract emp_code, employee name, and department from a Person ID header row.
+     */
+    private function extractBiometricEmployeeInfo(array $row): array
+    {
+        $info  = ['emp_code' => null, 'name' => null, 'dept_name' => null];
+        $count = count($row);
+
+        for ($i = 0; $i < $count - 1; $i++) {
+            $cell = strtolower(trim((string)($row[$i] ?? '')));
+
+            if ($cell === 'person id') {
+                for ($j = $i + 1; $j < min($i + 5, $count); $j++) {
+                    $val = trim((string)($row[$j] ?? ''));
+                    if ($val !== '') {
+                        $info['emp_code'] = $val;
+                        break;
+                    }
+                }
+            }
+
+            if ($cell === 'employee name') {
+                for ($j = $i + 1; $j < min($i + 7, $count); $j++) {
+                    $val = trim((string)($row[$j] ?? ''));
+                    if ($val !== '' && !in_array(strtolower($val), ['department', 'position', 'joiningdate', 'joining date'])) {
+                        $info['name'] = $val;
+                        break;
+                    }
+                }
+            }
+
+            if ($cell === 'department') {
+                for ($j = $i + 1; $j < min($i + 4, $count); $j++) {
+                    $val = trim((string)($row[$j] ?? ''));
+                    if ($val !== '' && !in_array(strtolower($val), ['joiningdate', 'joining date', 'position'])) {
+                        $info['dept_name'] = $val;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $info;
+    }
+
+    /**
+     * Map column indices in the Date row to full 'Y-m-d' dates.
+     *
+     * Day numbers >= period start day  → same month as period_start
+     * Day numbers <  period start day  → next month
+     */
+    private function extractBiometricDateColumns(array $row, Carbon $periodDate, int $periodDay): array
+    {
+        $dateColumns = [];
+
+        for ($i = 1; $i < count($row); $i++) {
+            $val = trim((string)($row[$i] ?? ''));
+            if (!is_numeric($val)) {
+                continue;
+            }
+
+            $dayNum = (int)$val;
+            if ($dayNum < 1 || $dayNum > 31) {
+                continue;
+            }
+
+            try {
+                if ($dayNum >= $periodDay) {
+                    $date = Carbon::create($periodDate->year, $periodDate->month, $dayNum);
+                } else {
+                    $nextMonth = $periodDate->copy()->addMonth();
+                    if ($dayNum > $nextMonth->daysInMonth) {
+                        continue; // e.g. day 31 in a 30-day month
+                    }
+                    $date = Carbon::create($nextMonth->year, $nextMonth->month, $dayNum);
+                }
+                $dateColumns[$i] = $date->format('Y-m-d');
+            } catch (\Exception $e) {
+                // skip
+            }
+        }
+
+        return $dateColumns;
+    }
 }

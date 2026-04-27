@@ -230,11 +230,11 @@ function App() {
             }
           />
 
-          {/* Leave Management - Admin Approval and HR View */}
+          {/* Leave Management - Admin/HOD Approval and HR View */}
           <Route
             path="dashboard/leave-approval"
             element={
-              <ProtectedRoute allowedRoles={['admin', 'hod', 'senior_employee', 'employee']} requireHROrAdmin={true}>
+              <ProtectedRoute allowedRoles={['admin', 'hod']} allowHR={true}>
                 <LeaveApproval />
               </ProtectedRoute>
             }
